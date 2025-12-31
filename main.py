@@ -28,28 +28,39 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     # MongoDB Connection
-    client = AsyncIOMotorClient(os.getenv("MONGODB_URI"))
-    
-    # Initialize Beanie with models
-    await init_beanie(
-        database=client.get_default_database(),
-        document_models=[
-            User,
-            BrandKit,
-            ScheduledPost,
-            AnalyticsSnapshot
-        ]
-    )
-    print("Beanie initialized with models")
+    mongo_uri = os.getenv("MONGODB_URI")
+    if not mongo_uri:
+        print("CRITICAL: MONGODB_URI not found in environment")
+        return
 
-# Include Routers
-app.include_router(ai_routes.router)
-app.include_router(analytics_routes.router)
-app.include_router(auth_routes.router)
+    try:
+        client = AsyncIOMotorClient(mongo_uri)
+        # Verify connection
+        await client.admin.command('ping')
+        
+        # Initialize Beanie with models
+        await init_beanie(
+            database=client.get_default_database(),
+            document_models=[
+                User,
+                BrandKit,
+                ScheduledPost,
+                AnalyticsSnapshot
+            ]
+        )
+        print("Beanie initialized successfully")
+    except Exception as e:
+        print(f"CRITICAL: Failed to initialize database: {e}")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "message": "HighShift Backend is healthy"}
+    # Check if DB is initialized
+    db_status = "connected" if User.get_motor_collection() is not None else "disconnected"
+    return {
+        "status": "ok", 
+        "message": "HighShift Backend is running",
+        "database": db_status
+    }
 
 @app.get("/")
 async def root():
