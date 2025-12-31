@@ -11,6 +11,7 @@ from app.models.scheduled_post import ScheduledPost
 from app.models.analytics import AnalyticsSnapshot
 from app.models.oauth_state import OAuthState
 from app.routes import ai_routes, analytics_routes, auth_routes, key_routes, post_routes
+from app.utils.auth import get_current_user # Added import
 
 # Load environment variables
 load_dotenv()
