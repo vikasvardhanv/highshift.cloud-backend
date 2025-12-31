@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
 from app.models.user import User
@@ -14,7 +15,37 @@ from app.routes import ai_routes, analytics_routes, auth_routes, key_routes, pos
 # Load environment variables
 load_dotenv()
 
-app = FastAPI(title="HighShift AI Backend", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: MongoDB Connection
+    mongo_uri = os.getenv("MONGODB_URI")
+    if mongo_uri:
+        try:
+            client = AsyncIOMotorClient(mongo_uri)
+            # Verify connection
+            await client.admin.command('ping')
+            
+            # Initialize Beanie with models
+            await init_beanie(
+                database=client.get_default_database(),
+                document_models=[
+                    User,
+                    BrandKit,
+                    ScheduledPost,
+                    AnalyticsSnapshot,
+                    OAuthState
+                ]
+            )
+            print("Beanie initialized successfully")
+        except Exception as e:
+            print(f"CRITICAL: Failed to initialize database: {e}")
+    else:
+        print("CRITICAL: MONGODB_URI not found in environment")
+    
+    yield
+    # Shutdown logic (if any) can go here
+
+app = FastAPI(title="HighShift AI Backend", version="1.0.0", lifespan=lifespan)
 
 # CORS configuration
 origins = os.getenv("CORS_ORIGINS", "*").split(",")
@@ -25,34 +56,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-async def startup_event():
-    # MongoDB Connection
-    mongo_uri = os.getenv("MONGODB_URI")
-    if not mongo_uri:
-        print("CRITICAL: MONGODB_URI not found in environment")
-        return
-
-    try:
-        client = AsyncIOMotorClient(mongo_uri)
-        # Verify connection
-        await client.admin.command('ping')
-        
-        # Initialize Beanie with models
-        await init_beanie(
-            database=client.get_default_database(),
-            document_models=[
-                User,
-                BrandKit,
-                ScheduledPost,
-                AnalyticsSnapshot,
-                OAuthState
-            ]
-        )
-        print("Beanie initialized successfully")
-    except Exception as e:
-        print(f"CRITICAL: Failed to initialize database: {e}")
 
 # Include Routers
 app.include_router(ai_routes.router)
