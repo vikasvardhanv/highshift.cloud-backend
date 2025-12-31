@@ -55,3 +55,13 @@ async def post_tweet(access_token: str, text: str):
         )
         res.raise_for_status()
         return res.json()
+
+async def get_me(access_token: str):
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            "https://api.twitter.com/2/users/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"user.fields": "profile_image_url,description"}
+        )
+        res.raise_for_status()
+        return res.json()

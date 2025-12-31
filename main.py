@@ -8,6 +8,7 @@ from app.models.user import User
 from app.models.brand_kit import BrandKit
 from app.models.scheduled_post import ScheduledPost
 from app.models.analytics import AnalyticsSnapshot
+from app.models.oauth_state import OAuthState
 from app.routes import ai_routes, analytics_routes, auth_routes, key_routes, post_routes
 
 # Load environment variables
@@ -45,7 +46,8 @@ async def startup_event():
                 User,
                 BrandKit,
                 ScheduledPost,
-                AnalyticsSnapshot
+                AnalyticsSnapshot,
+                OAuthState
             ]
         )
         print("Beanie initialized successfully")
