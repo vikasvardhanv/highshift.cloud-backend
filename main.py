@@ -94,14 +94,14 @@ async def health_check():
         
     return {
         "status": "ok" if "error" not in db_status else "degraded", 
-        "message": "Upload-Post Backend is running",
+        "message": "HighShift Cloud Backend is running",
         "database": db_status,
         "initialized": db_initialized
     }
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to HighShift AI API (Python/FastAPI)"}
+    return {"message": "Welcome to HighShift Cloud API (Python/FastAPI)"}
 
 if __name__ == "__main__":
     import uvicorn
