@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+beanie
+motor
+httpx
+python-multipart
+pycryptodome
+openai
+anthropic
+langchain
+pandas
+numpy
+apscheduler
+python-jose[cryptography]
+passlib[bcrypt]
