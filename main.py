@@ -15,33 +15,41 @@ from app.routes import ai_routes, analytics_routes, auth_routes, key_routes, pos
 # Load environment variables
 load_dotenv()
 
+db_initialized = False
+
+async def ensure_beanie_initialized():
+    global db_initialized
+    if db_initialized:
+        return
+    
+    mongo_uri = os.getenv("MONGODB_URI")
+    if not mongo_uri:
+        print("CRITICAL: MONGODB_URI not found")
+        return
+
+    try:
+        client = AsyncIOMotorClient(mongo_uri)
+        # Use a database name if specified in URI or default to 'test'
+        db = client.get_default_database()
+        
+        await init_beanie(
+            database=db,
+            document_models=[
+                User,
+                BrandKit,
+                ScheduledPost,
+                AnalyticsSnapshot,
+                OAuthState
+            ]
+        )
+        db_initialized = True
+        print("Beanie initialized successfully")
+    except Exception as e:
+        print(f"Failed to initialize Beanie: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: MongoDB Connection
-    mongo_uri = os.getenv("MONGODB_URI")
-    if mongo_uri:
-        try:
-            client = AsyncIOMotorClient(mongo_uri)
-            # Verify connection
-            await client.admin.command('ping')
-            
-            # Initialize Beanie with models
-            await init_beanie(
-                database=client.get_default_database(),
-                document_models=[
-                    User,
-                    BrandKit,
-                    ScheduledPost,
-                    AnalyticsSnapshot,
-                    OAuthState
-                ]
-            )
-            print("Beanie initialized successfully")
-        except Exception as e:
-            print(f"CRITICAL: Failed to initialize database: {e}")
-    else:
-        print("CRITICAL: MONGODB_URI not found in environment")
-    
+    await ensure_beanie_initialized()
     yield
     # Shutdown logic (if any) can go here
 
@@ -66,18 +74,23 @@ app.include_router(post_routes.router)
 
 @app.get("/health")
 async def health_check():
+    global db_initialized
     try:
-        # Check if Beanie is initialized by checking the collection state
-        # We catch the StateError if it hasn't been initialized yet
-        User.get_motor_collection()
+        # Check if initialized
+        if not db_initialized:
+            await ensure_beanie_initialized()
+            
+        # Try a simple query
+        await User.count()
         db_status = "connected"
-    except Exception:
-        db_status = "disconnected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
         
     return {
-        "status": "ok", 
-        "message": "HighShift Backend is running",
-        "database": db_status
+        "status": "ok" if "error" not in db_status else "degraded", 
+        "message": "Upload-Post Backend is running",
+        "database": db_status,
+        "initialized": db_initialized
     }
 
 @app.get("/")

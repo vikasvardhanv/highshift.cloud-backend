@@ -9,7 +9,14 @@ from app.models.oauth_state import OAuthState
 from app.platforms import instagram, twitter, facebook, linkedin, youtube
 from app.services.token_service import encrypt_token
 
-router = APIRouter(prefix="/connect", tags=["Auth"])
+from app.services.token_service import encrypt_token
+
+# Add a simple helper to be used as a dependency
+async def ensure_db():
+    from main import ensure_beanie_initialized
+    await ensure_beanie_initialized()
+
+router = APIRouter(prefix="/connect", tags=["Auth"], dependencies=[Depends(ensure_db)])
 
 @router.get("/{platform}")
 async def connect_platform(
