@@ -2,29 +2,14 @@
     "version": 2,
     "builds": [
         {
-            "src": "src/server.js",
-            "use": "@vercel/node"
-        },
-        {
-            "src": "frontend/package.json",
-            "use": "@vercel/static-build",
-            "config": {
-                "distDir": "dist"
-            }
+            "src": "main.py",
+            "use": "@vercel/python"
         }
     ],
     "routes": [
         {
-            "src": "/assets/(.*)",
-            "dest": "/frontend/assets/$1"
-        },
-        {
-            "src": "/(connect|linked-accounts|post|health|.*\\.json)",
-            "dest": "/src/server.js"
-        },
-        {
             "src": "/(.*)",
-            "dest": "/frontend/index.html"
+            "dest": "main.py"
         }
     ]
 }
