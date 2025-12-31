@@ -4,7 +4,7 @@ import os
 import uuid
 from app.utils.auth import get_current_user
 from app.models.user import User
-from app.platforms import instagram # Example platform
+from app.platforms import instagram, twitter # Added twitter
 from app.services.token_service import encrypt_token
 
 router = APIRouter(prefix="/connect", tags=["Auth"])
@@ -25,7 +25,18 @@ async def connect_platform(
         redirect_uri = os.getenv("INSTAGRAM_REDIRECT_URI")
         scopes = os.getenv("INSTAGRAM_SCOPES", "").split(",")
         url = await instagram.get_auth_url(client_id, redirect_uri, state, scopes)
-        return {"url": url}
+        return {"authUrl": url}
+    
+    if platform == "twitter":
+        client_id = os.getenv("TWITTER_CLIENT_ID")
+        redirect_uri = os.getenv("TWITTER_REDIRECT_URI")
+        scopes = os.getenv("TWITTER_SCOPES", "tweet.read,tweet.write,users.read,offline.access").split(",")
+        
+        # Note: In a real app, store code_verifier linked to state
+        code_verifier, code_challenge = twitter.generate_pkce_pair()
+        
+        url = await twitter.get_auth_url(client_id, redirect_uri, state, scopes, code_challenge)
+        return {"authUrl": url}
     
     raise HTTPException(status_code=400, detail=f"Platform {platform} not supported yet")
 
