@@ -52,6 +52,11 @@ async def startup_event():
     except Exception as e:
         print(f"CRITICAL: Failed to initialize database: {e}")
 
+# Include Routers
+app.include_router(ai_routes.router)
+app.include_router(analytics_routes.router)
+app.include_router(auth_routes.router)
+
 @app.get("/health")
 async def health_check():
     # Check if DB is initialized
