@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.responses import RedirectResponse
 import os
 import uuid
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, get_optional_user
 from app.models.user import User
 from app.platforms import instagram, twitter, facebook, linkedin, youtube
 from app.services.token_service import encrypt_token
@@ -12,13 +12,18 @@ router = APIRouter(prefix="/connect", tags=["Auth"])
 @router.get("/{platform}")
 async def connect_platform(
     platform: str, 
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_optional_user)
 ):
     """
     Redirect the user to the platform's OAuth page.
     """
-    state = str(uuid.uuid4())
-    # In a real app, store 'state' in DB/Redis and verify in callback
+    # Encode userId in state if user is logged in
+    # This allows the callback to link the account to the correct user
+    state_payload = str(uuid.uuid4())
+    if user:
+        state_payload = f"{state_payload}:{str(user.id)}"
+    
+    state = state_payload
     
     if platform == "instagram":
         client_id = os.getenv("FACEBOOK_APP_ID")

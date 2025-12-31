@@ -30,3 +30,18 @@ async def get_current_user(api_key: str = Security(api_header)):
         )
     
     return user
+
+async def get_optional_user(api_key: str = Security(api_header)):
+    """
+    FastAPI dependency to optionally return a User if API key is provided.
+    Does NOT raise 403 if key is missing or invalid.
+    """
+    if not api_key:
+        return None
+    
+    try:
+        hashed = hash_key(api_key)
+        user = await User.find_one({"apiKeyHash": hashed})
+        return user
+    except Exception:
+        return None
