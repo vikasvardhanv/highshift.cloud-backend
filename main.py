@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.brand_kit import BrandKit
 from app.models.scheduled_post import ScheduledPost
 from app.models.analytics import AnalyticsSnapshot
-from app.routes import ai_routes, analytics_routes, auth_routes
+from app.routes import ai_routes, analytics_routes, auth_routes, key_routes, post_routes
 
 # Load environment variables
 load_dotenv()
@@ -56,6 +56,8 @@ async def startup_event():
 app.include_router(ai_routes.router)
 app.include_router(analytics_routes.router)
 app.include_router(auth_routes.router)
+app.include_router(key_routes.router)
+app.include_router(post_routes.router)
 
 @app.get("/health")
 async def health_check():

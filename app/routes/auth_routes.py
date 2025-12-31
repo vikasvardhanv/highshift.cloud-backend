@@ -4,7 +4,7 @@ import os
 import uuid
 from app.utils.auth import get_current_user
 from app.models.user import User
-from app.platforms import instagram, twitter # Added twitter
+from app.platforms import instagram, twitter, facebook, linkedin, youtube
 from app.services.token_service import encrypt_token
 
 router = APIRouter(prefix="/connect", tags=["Auth"])
@@ -36,6 +36,27 @@ async def connect_platform(
         code_verifier, code_challenge = twitter.generate_pkce_pair()
         
         url = await twitter.get_auth_url(client_id, redirect_uri, state, scopes, code_challenge)
+        return {"authUrl": url}
+
+    if platform == "facebook":
+        client_id = os.getenv("FACEBOOK_APP_ID")
+        redirect_uri = os.getenv("FACEBOOK_REDIRECT_URI")
+        scopes = os.getenv("FACEBOOK_SCOPES", "pages_manage_posts,pages_read_engagement").split(",")
+        url = await facebook.get_auth_url(client_id, redirect_uri, state, scopes)
+        return {"authUrl": url}
+
+    if platform == "linkedin":
+        client_id = os.getenv("LINKEDIN_CLIENT_ID")
+        redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
+        scopes = os.getenv("LINKEDIN_SCOPES", "w_member_social,r_liteprofile").split(",")
+        url = await linkedin.get_auth_url(client_id, redirect_uri, state, scopes)
+        return {"authUrl": url}
+
+    if platform == "youtube":
+        client_id = os.getenv("GOOGLE_CLIENT_ID")
+        redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+        scopes = os.getenv("GOOGLE_SCOPES", "https://www.googleapis.com/auth/youtube.upload").split(",")
+        url = await youtube.get_auth_url(client_id, redirect_uri, state, scopes)
         return {"authUrl": url}
     
     raise HTTPException(status_code=400, detail=f"Platform {platform} not supported yet")
