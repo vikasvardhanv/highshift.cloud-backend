@@ -30,10 +30,12 @@ async def ensure_beanie_initialized():
 
     try:
         client = AsyncIOMotorClient(mongo_uri)
-        # Use the database name from the URI, or fallback to 'highshift'
-        db = client.get_default_database()
-        if db is None:
-            # Fallback if no database name is in the connection string
+        
+        # Safely get database name
+        try:
+            db = client.get_default_database()
+        except Exception:
+            # If no default db in URI (raises ConfigurationError), use 'highshift'
             db = client["highshift"]
         
         await init_beanie(
