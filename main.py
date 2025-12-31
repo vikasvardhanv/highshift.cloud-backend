@@ -59,8 +59,14 @@ app.include_router(auth_routes.router)
 
 @app.get("/health")
 async def health_check():
-    # Check if DB is initialized
-    db_status = "connected" if User.get_motor_collection() is not None else "disconnected"
+    try:
+        # Check if Beanie is initialized by checking the collection state
+        # We catch the StateError if it hasn't been initialized yet
+        User.get_motor_collection()
+        db_status = "connected"
+    except Exception:
+        db_status = "disconnected"
+        
     return {
         "status": "ok", 
         "message": "HighShift Backend is running",
