@@ -11,7 +11,7 @@ router = APIRouter(prefix="/linked-accounts", tags=["Accounts"], dependencies=[D
 
 @router.get("")
 async def get_linked_accounts(user: User = Depends(get_current_user)):
-    return user.linked_accounts
+    return {"accounts": user.linked_accounts}
 
 @router.delete("/disconnect/{platform}/{account_id}")
 async def disconnect_account(
