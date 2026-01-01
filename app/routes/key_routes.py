@@ -22,6 +22,12 @@ async def create_key(
 ):
     name = payload.get("name", "New API Key")
     
+    # 1. B2B / Scaling Limits
+    # Limit number of API keys per user to prevent abuse
+    MAX_KEYS = 10 
+    if user.api_keys and len(user.api_keys) >= MAX_KEYS:
+        raise HTTPException(status_code=400, detail=f"Maximum of {MAX_KEYS} API Keys allowed.")
+    
     # Generate new key
     raw_key = f"hs_{secrets.token_hex(16)}"
     hashed = hash_key(raw_key)

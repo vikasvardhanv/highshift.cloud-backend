@@ -2,6 +2,7 @@ import hashlib
 from fastapi import Security, HTTPException, status
 from fastapi.security.api_key import APIKeyHeader
 from app.models.user import User
+from datetime import datetime
 
 API_KEY_NAME = "x-api-key"
 api_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
@@ -29,6 +30,14 @@ async def get_current_user(api_key: str = Security(api_header)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API Key"
         )
+
+    # B2B Audit: Update last_used
+    if user.api_keys:
+        for key in user.api_keys:
+            if key.key_hash == hashed:
+                key.last_used = datetime.utcnow()
+                await user.save()
+                break
     
     return user
 
