@@ -97,8 +97,9 @@ app.include_router(brand_routes.router)
 app.include_router(schedule_routes.router)
 app.include_router(history_routes.router)
 app.include_router(account_routes.router)
-from app.routes import legacy_routes
+from app.routes import legacy_routes, profile_routes
 app.include_router(legacy_routes.router)
+app.include_router(profile_routes.router)
 
 @app.get("/health")
 async def health_check():
