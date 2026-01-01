@@ -73,6 +73,12 @@ app = FastAPI(title="HighShift AI Backend", version="1.0.0", lifespan=lifespan)
 
 # CORS configuration
 origins = os.getenv("CORS_ORIGINS", "*").split(",")
+
+# Fallback: If "CORS_ORIGINS" is just "*" and allow_credentials is True, 
+# some browsers block it. We should ideally list domains.
+# However, for development or broad access, we can try to allow all.
+# If you face issues, set valid domains in .env e.g. https://your-frontend.vercel.app
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
