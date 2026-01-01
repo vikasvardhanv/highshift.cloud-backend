@@ -341,8 +341,11 @@ async def oauth_callback(
             # Clean up state
             await oauth_data.delete()
 
-            # 5. Redirect to frontend with data
-            redirect_params = f"platform=twitter&accountId={account_id}"
+            # 5. Generate JWT for authentication
+            jwt_token = create_access_token(data={"sub": str(user.id)})
+
+            # 6. Redirect to frontend with data
+            redirect_params = f"platform=twitter&accountId={account_id}&token={jwt_token}"
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
             
