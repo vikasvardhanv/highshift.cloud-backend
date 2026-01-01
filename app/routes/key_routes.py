@@ -35,7 +35,7 @@ async def create_key(
     new_key = ApiKey(
         id=str(uuid.uuid4()),
         name=name,
-        key_hash=hashed
+        keyHash=hashed
     )
     
     if user.api_keys is None:
