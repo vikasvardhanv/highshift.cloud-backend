@@ -43,6 +43,26 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
         res.raise_for_status()
         return res.json()
 
+async def refresh_access_token(client_id: str, client_secret: str, refresh_token: str):
+    """Refresh an expired Twitter access token using the refresh token."""
+    async with httpx.AsyncClient() as client:
+        auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        res = await client.post(
+            "https://api.twitter.com/2/oauth2/token",
+            headers={
+                "Authorization": f"Basic {auth}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token
+            }
+        )
+        res.raise_for_status()
+        return res.json()
+
 async def post_tweet(access_token: str, text: str):
     async with httpx.AsyncClient() as client:
         res = await client.post(

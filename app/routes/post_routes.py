@@ -21,6 +21,10 @@ class MultiPostRequest(BaseModel):
 
 @router.post("/multi")
 async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_current_user)):
+    import os
+    import datetime
+    from app.services.token_service import encrypt_token
+    
     results = []
     
     for target in req.accounts:
@@ -35,8 +39,61 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
             token = decrypt_token(account.access_token_enc)
             
             if target.platform == "twitter":
-                res = await twitter.post_tweet(token, req.content)
-                results.append({"platform": "twitter", "status": "success", "id": res.get("data", {}).get("id")})
+                # Check if token is expired and refresh if needed
+                if account.expires_at and account.expires_at < datetime.datetime.utcnow():
+                    logger.info(f"Twitter token expired for account {target.accountId}, refreshing...")
+                    if account.refresh_token_enc:
+                        try:
+                            refresh_token = decrypt_token(account.refresh_token_enc)
+                            new_tokens = await twitter.refresh_access_token(
+                                client_id=os.getenv("TWITTER_CLIENT_ID"),
+                                client_secret=os.getenv("TWITTER_CLIENT_SECRET"),
+                                refresh_token=refresh_token
+                            )
+                            # Update stored tokens
+                            token = new_tokens["access_token"]
+                            account.access_token_enc = encrypt_token(token)
+                            if new_tokens.get("refresh_token"):
+                                account.refresh_token_enc = encrypt_token(new_tokens["refresh_token"])
+                            account.expires_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=new_tokens.get("expires_in", 7200))
+                            await user.save()
+                            logger.info(f"Twitter token refreshed successfully for account {target.accountId}")
+                        except Exception as refresh_error:
+                            logger.error(f"Failed to refresh Twitter token: {refresh_error}")
+                            results.append({"platform": "twitter", "status": "failed", "error": f"Token expired and refresh failed: {str(refresh_error)}"})
+                            continue
+                    else:
+                        results.append({"platform": "twitter", "status": "failed", "error": "Token expired and no refresh token available. Please reconnect your account."})
+                        continue
+                
+                try:
+                    res = await twitter.post_tweet(token, req.content)
+                    results.append({"platform": "twitter", "status": "success", "id": res.get("data", {}).get("id")})
+                except Exception as post_error:
+                    # If 401, try refreshing token once more
+                    if "401" in str(post_error) and account.refresh_token_enc:
+                        logger.info(f"Got 401 on post, attempting token refresh for {target.accountId}")
+                        try:
+                            refresh_token = decrypt_token(account.refresh_token_enc)
+                            new_tokens = await twitter.refresh_access_token(
+                                client_id=os.getenv("TWITTER_CLIENT_ID"),
+                                client_secret=os.getenv("TWITTER_CLIENT_SECRET"),
+                                refresh_token=refresh_token
+                            )
+                            token = new_tokens["access_token"]
+                            account.access_token_enc = encrypt_token(token)
+                            if new_tokens.get("refresh_token"):
+                                account.refresh_token_enc = encrypt_token(new_tokens["refresh_token"])
+                            account.expires_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=new_tokens.get("expires_in", 7200))
+                            await user.save()
+                            
+                            # Retry post with new token
+                            res = await twitter.post_tweet(token, req.content)
+                            results.append({"platform": "twitter", "status": "success", "id": res.get("data", {}).get("id")})
+                        except Exception as retry_error:
+                            results.append({"platform": "twitter", "status": "failed", "error": str(retry_error)})
+                    else:
+                        raise post_error
                 
             elif target.platform == "instagram":
                 # Instagram requires an image URL
