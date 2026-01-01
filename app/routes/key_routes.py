@@ -1,35 +1,56 @@
-from fastapi import APIRouter, Depends, HTTPException
-import uuid
-import hashlib
+from fastapi import APIRouter, Depends, HTTPException, Body
+from app.models.user import User, ApiKey
 from app.utils.auth import get_current_user, hash_key
-from app.models.user import User
+import secrets
+import uuid
 
-router = APIRouter(prefix="/key", tags=["Security"])
+# Check if DB is ready
+async def ensure_db():
+    from main import ensure_beanie_initialized
+    await ensure_beanie_initialized()
 
-@router.get("/me")
-async def get_my_key_info(user: User = Depends(get_current_user)):
-    return {
-        "userId": str(user.id),
-        "createdAt": user.created_at,
-        "accountCount": len(user.linked_accounts)
-    }
+router = APIRouter(prefix="/keys", tags=["API Keys"], dependencies=[Depends(ensure_db)])
 
-@router.post("/regenerate")
-async def regenerate_api_key(userId: str):
-    """
-    Generate a new API key for a user.
-    Note: For simplicity, this takes a userId. In a real app, this would be protected by 
-    a session or a different auth mechanism.
-    """
-    user = await User.get(userId)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+@router.get("")
+async def get_keys(user: User = Depends(get_current_user)):
+    return {"keys": user.api_keys}
+
+@router.post("")
+async def create_key(
+    payload: dict = Body(...),
+    user: User = Depends(get_current_user)
+):
+    name = payload.get("name", "New API Key")
+    
+    # Generate new key
+    raw_key = f"hs_{secrets.token_hex(16)}"
+    hashed = hash_key(raw_key)
+    
+    new_key = ApiKey(
+        id=str(uuid.uuid4()),
+        name=name,
+        key_hash=hashed
+    )
+    
+    if user.api_keys is None:
+        user.api_keys = []
         
-    new_key = f"hs_{uuid.uuid4().hex}"
-    user.api_key_hash = hash_key(new_key)
+    user.api_keys.append(new_key)
     await user.save()
     
-    return {
-        "apiKey": new_key,
-        "message": "Copy this key now. It will not be shown again."
-    }
+    # Return the raw key ONLY once
+    return {"key": new_key, "rawApiKey": raw_key}
+
+@router.delete("/{key_id}")
+async def delete_key(
+    key_id: str,
+    user: User = Depends(get_current_user)
+):
+    original_count = len(user.api_keys)
+    user.api_keys = [k for k in user.api_keys if k.id != key_id]
+    
+    if len(user.api_keys) == original_count:
+        raise HTTPException(status_code=404, detail="Key not found")
+        
+    await user.save()
+    return {"success": True, "remaining": len(user.api_keys)}

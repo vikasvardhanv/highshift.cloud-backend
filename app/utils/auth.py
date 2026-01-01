@@ -21,7 +21,8 @@ async def get_current_user(api_key: str = Security(api_header)):
         )
     
     hashed = hash_key(api_key)
-    user = await User.find_one({"apiKeyHash": hashed})
+    # Check both legacy single key and new list of keys
+    user = await User.find_one({"$or": [{"apiKeyHash": hashed}, {"apiKeys.keyHash": hashed}]})
     
     if not user:
         raise HTTPException(
@@ -41,7 +42,7 @@ async def get_optional_user(api_key: str = Security(api_header)):
     
     try:
         hashed = hash_key(api_key)
-        user = await User.find_one({"apiKeyHash": hashed})
+        user = await User.find_one({"$or": [{"apiKeyHash": hashed}, {"apiKeys.keyHash": hashed}]})
         return user
     except Exception:
         return None
