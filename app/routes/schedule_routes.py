@@ -13,7 +13,7 @@ router = APIRouter(prefix="/schedule", tags=["Schedule"], dependencies=[Depends(
 
 @router.get("")
 async def get_schedule(
-    user: User = Depends(get_api_key_user)
+    user: User = Depends(get_current_user)
 ):
     posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("-scheduled_time").to_list()
     return {"posts": posts}
@@ -21,7 +21,7 @@ async def get_schedule(
 @router.post("")
 async def create_schedule(
     payload: dict = Body(...),
-    user: User = Depends(get_api_key_user)
+    user: User = Depends(get_current_user)
 ):
     content = payload.get("content")
     accounts = payload.get("accounts", []) # List of {platform, accountId}

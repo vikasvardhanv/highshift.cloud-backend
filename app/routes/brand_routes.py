@@ -13,7 +13,7 @@ router = APIRouter(prefix="/brand", tags=["BrandKit"], dependencies=[Depends(ens
 
 @router.get("")
 async def get_brand_settings(
-    user: User = Depends(get_api_key_user)
+    user: User = Depends(get_current_user)
 ):
     brand = await BrandKit.find_one(BrandKit.user_id == user.id)
     if not brand:
@@ -31,7 +31,7 @@ async def get_brand_settings(
 @router.post("")
 async def update_brand_settings(
     payload: dict,
-    user: User = Depends(get_api_key_user)
+    user: User = Depends(get_current_user)
 ):
     brand = await BrandKit.find_one(BrandKit.user_id == user.id)
     

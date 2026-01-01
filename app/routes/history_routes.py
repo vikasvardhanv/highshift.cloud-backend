@@ -12,7 +12,7 @@ router = APIRouter(prefix="/posts", tags=["History"], dependencies=[Depends(ensu
 
 @router.get("/history")
 async def get_post_history(
-    user: User = Depends(get_api_key_user)
+    user: User = Depends(get_current_user)
 ):
     # Find all posts (scheduled, published, failed)
     # Ideally separate collection for 'History' logs or query ScheduledPost with status != scheduled
