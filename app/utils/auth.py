@@ -33,11 +33,16 @@ async def get_current_user(api_key: str = Security(api_header)):
 
     # B2B Audit: Update last_used
     if user.api_keys:
-        for key in user.api_keys:
-            if key.key_hash == hashed:
-                key.last_used = datetime.utcnow()
-                await user.save()
-                break
+        try:
+            for key in user.api_keys:
+                if key.key_hash == hashed:
+                    key.last_used = datetime.utcnow()
+                    await user.save()
+                    break
+        except Exception as e:
+            # Don't fail the request if audit logging fails (e.g. DB busy)
+            # print(f"Audit log failed: {e}") 
+            pass
     
     return user
 
