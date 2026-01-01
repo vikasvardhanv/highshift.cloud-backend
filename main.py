@@ -18,7 +18,8 @@ from app.routes import (
     post_routes,
     brand_routes,
     schedule_routes,
-    history_routes
+    history_routes,
+    account_routes
 )
 from app.utils.auth import get_current_user # Added import
 
@@ -89,6 +90,7 @@ app.include_router(post_routes.router)
 app.include_router(brand_routes.router)
 app.include_router(schedule_routes.router)
 app.include_router(history_routes.router)
+app.include_router(account_routes.router)
 
 @app.get("/health")
 async def health_check():
