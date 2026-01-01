@@ -237,6 +237,7 @@ async def connect_platform(
     
     raise HTTPException(status_code=400, detail=f"Platform {platform} not supported yet")
 
+# Support both /auth/{platform}/callback AND /connect/{platform}/callback
 @router.get("/{platform}/callback")
 async def oauth_callback(
     platform: str,
@@ -346,3 +347,16 @@ async def oauth_callback(
         import traceback
         print(traceback.format_exc())
         return RedirectResponse(url=f"{frontend_url}/auth/callback?error={str(e)}")
+
+
+# ============ Route Alias for /connect/{platform}/callback ============
+# This is for backwards compatibility with existing Twitter Developer settings
+from fastapi import APIRouter as ConnectRouter
+
+connect_router = APIRouter(prefix="/connect", tags=["Connect Alias"], dependencies=[Depends(ensure_db)])
+
+@connect_router.get("/{platform}/callback")
+async def connect_oauth_callback(platform: str, code: str = Query(...), state: str = Query(...)):
+    """Alias for /auth/{platform}/callback - forwards to main oauth_callback."""
+    return await oauth_callback(platform, code, state)
+

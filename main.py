@@ -98,8 +98,10 @@ app.include_router(schedule_routes.router)
 app.include_router(history_routes.router)
 app.include_router(account_routes.router)
 from app.routes import legacy_routes, profile_routes
+from app.routes.auth_routes import connect_router
 app.include_router(legacy_routes.router)
 app.include_router(profile_routes.router)
+app.include_router(connect_router)  # Alias for /connect/{platform}/callback
 
 @app.get("/health")
 async def health_check():
