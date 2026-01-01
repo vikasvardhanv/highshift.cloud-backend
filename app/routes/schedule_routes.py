@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from app.models.user import User
 from app.models.scheduled_post import ScheduledPost
-from app.utils.auth import get_api_key_user
+from app.utils.auth import get_current_user
 from typing import List, Optional
 import datetime
 
@@ -52,7 +52,7 @@ async def create_schedule(
 @router.delete("/{post_id}")
 async def delete_scheduled_post(
     post_id: str,
-    user: User = Depends(get_api_key_user)
+    user: User = Depends(get_current_user)
 ):
     # In Beanie we need Pydantic ObjectId usually, but find_one works with string if defined carefully
     # Assuming str works or converting if needed. Beanie handles str -> ObjectId often automatically.

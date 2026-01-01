@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.models.user import User
 from app.models.scheduled_post import ScheduledPost
-from app.utils.auth import get_api_key_user
+from app.utils.auth import get_current_user
 from typing import List
 
 async def ensure_db():

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.models.user import User
 from app.models.brand_kit import BrandKit
-from app.utils.auth import get_current_user, get_api_key_user
+from app.utils.auth import get_current_user
 import uuid
 
 # Check if DB is ready
