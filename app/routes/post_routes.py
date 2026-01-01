@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Optional
 from app.utils.auth import get_current_user
@@ -6,6 +6,7 @@ from app.models.user import User
 from app.platforms import instagram, twitter, facebook, linkedin
 from app.services.token_service import decrypt_token
 from app.utils.logger import logger
+import json
 
 router = APIRouter(prefix="/post", tags=["Publishing"])
 
@@ -62,3 +63,53 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
             results.append({"platform": target.platform, "status": "failed", "error": str(e)})
             
     return {"results": results}
+
+
+# ============ NEW: File Upload Endpoint ============
+@router.post("/upload")
+async def upload_and_post(
+    accounts: str = Form(...),  # JSON string of accounts array
+    content: str = Form(...),
+    files: List[UploadFile] = File(default=[]),
+    media_urls: str = Form(default="[]"),  # JSON string of URL array
+    user: User = Depends(get_current_user)
+):
+    """
+    Upload media files or provide URLs, then publish to selected platforms.
+    
+    - accounts: JSON array of {platform, accountId} objects
+    - content: Post caption/text
+    - files: Optional uploaded media files (photos/videos)
+    - media_urls: Optional JSON array of media URLs
+    """
+    try:
+        accounts_list = json.loads(accounts)
+        urls_list = json.loads(media_urls)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON in accounts or media_urls")
+    
+    # TODO: In production, upload files to cloud storage (S3/Cloudinary) and get URLs
+    # For now, we'll note this as a placeholder and use URLs if provided
+    
+    media = urls_list.copy()
+    
+    if files:
+        for f in files:
+            # Placeholder: In production, upload to S3 and append URL
+            # For now, we'll add a note that files were received
+            logger.info(f"Received file: {f.filename}, size: {f.size}")
+            # media.append(uploaded_url)  # Would add real URL here
+        
+        if not media:
+            # If uploads were provided but we can't process them yet
+            logger.warning("File uploads received but cloud storage not configured. Use media_urls instead.")
+    
+    # Create request and delegate to existing logic
+    req = MultiPostRequest(
+        accounts=[PostAccount(**acc) for acc in accounts_list],
+        content=content,
+        media=media
+    )
+    
+    return await multi_platform_post(req, user)
+
