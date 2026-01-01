@@ -1,24 +1,173 @@
-from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, Body
 from fastapi.responses import RedirectResponse
 import os
 import uuid
 import datetime
-from app.utils.auth import get_current_user, get_optional_user, hash_key
-from app.models.user import User, LinkedAccount
+from app.utils.auth import (
+    get_current_user, 
+    get_optional_user, 
+    hash_key, 
+    verify_password, 
+    get_password_hash, 
+    create_access_token
+)
+from app.models.user import User, LinkedAccount, ApiKey
 from app.models.oauth_state import OAuthState
 from app.platforms import instagram, twitter, facebook, linkedin, youtube
 from app.services.token_service import encrypt_token
 
-from app.services.token_service import encrypt_token
+from pydantic import BaseModel, EmailStr
 
 # Add a simple helper to be used as a dependency
 async def ensure_db():
     from main import ensure_beanie_initialized
     await ensure_beanie_initialized()
 
-router = APIRouter(prefix="/connect", tags=["Auth"], dependencies=[Depends(ensure_db)])
+router = APIRouter(prefix="/auth", tags=["Auth"], dependencies=[Depends(ensure_db)])
 
-@router.get("/{platform}")
+# --- Pydantic Models for Auth ---
+class UserRegister(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+# --- Endpoints ---
+
+@router.post("/register")
+async def register(user_data: UserRegister):
+    # Check if user exists
+    existing_user = await User.find_one(User.email == user_data.email)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create new user
+    hashed_pwd = get_password_hash(user_data.password)
+    api_key_str = f"hs_{uuid.uuid4().hex}"
+    
+    new_user = User(
+        email=user_data.email,
+        passwordHash=hashed_pwd,
+        apiKeyHash=hash_key(api_key_str),
+        apiKeys=[ApiKey(name="Default Key", keyHash=hash_key(api_key_str))]
+    )
+    await new_user.insert()
+    
+    # Generate JWT
+    access_token = create_access_token(data={"sub": str(new_user.id)})
+    
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "api_key": api_key_str # Return API key once on registration
+    }
+
+@router.post("/login")
+async def login(user_data: UserLogin):
+    user = await User.find_one(User.email == user_data.email)
+    if not user or not user.password_hash:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    if not verify_password(user_data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    access_token = create_access_token(data={"sub": str(user.id)})
+    
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer"
+    }
+
+@router.get("/google")
+async def google_login():
+    """Start Google OAuth flow for Login (not YouTube channel linking)."""
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URL_LOGIN", os.getenv("CORS_ORIGINS", "").split(",")[0] + "/auth/callback") # Default or specific env
+    # Note: If separate redirect needed, assume backend handles it. 
+    # For now, let's reuse the logic but with a specific state to distinguish login vs linking if needed.
+    # Actually, standard Google Login usually uses a simpler scope: openid email profile
+    
+    # We'll use a backend callback for security, then redirect to frontend
+    backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'http://localhost:3000')}/auth/google/callback"
+    
+    state = str(uuid.uuid4())
+    scopes = ["openid", "email", "profile"]
+    
+    # Using the existing youtube helper but overriding params, or just construct URL manually
+    # Just constructing manually for simplicity as platform helpers are specific
+    
+    scope_str = " ".join(scopes)
+    auth_url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth?"
+        f"response_type=code&client_id={client_id}&redirect_uri={backend_redirect_uri}&"
+        f"scope={scope_str}&state={state}&access_type=offline&prompt=consent"
+    )
+    
+    return {"authUrl": auth_url}
+
+@router.get("/google/callback")
+async def google_callback(code: str, state: str):
+    import httpx
+    
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'http://localhost:3000')}/auth/google/callback"
+    frontend_url = os.getenv("CORS_ORIGINS", "").split(",")[0] or "http://localhost:5173"
+
+    async with httpx.AsyncClient() as client:
+        # Exchange code
+        token_res = await client.post("https://oauth2.googleapis.com/token", data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": backend_redirect_uri,
+        })
+        token_data = token_res.json()
+        
+        if "error" in token_data:
+             return RedirectResponse(f"{frontend_url}/login?error=google_auth_failed")
+             
+        access_token = token_data["access_token"]
+        
+        # Get Profile
+        user_info_res = await client.get("https://www.googleapis.com/oauth2/v2/userinfo", headers={
+            "Authorization": f"Bearer {access_token}"
+        })
+        user_info = user_info_res.json()
+        
+        google_id = user_info["id"]
+        email = user_info["email"]
+        
+        # Find or Create User
+        user = await User.find_one({"$or": [{"googleId": google_id}, {"email": email}]})
+        
+        if not user:
+            # Create new
+            api_key_str = f"hs_{uuid.uuid4().hex}"
+            user = User(
+                email=email,
+                googleId=google_id,
+                apiKeyHash=hash_key(api_key_str),
+                apiKeys=[ApiKey(name="Default Key", keyHash=hash_key(api_key_str))]
+            )
+            await user.insert()
+        else:
+            # Link Google ID if only email matched
+            if not user.google_id:
+                user.google_id = google_id
+                await user.save()
+        
+        # Generate JWT
+        jwt_token = create_access_token(data={"sub": str(user.id)})
+        
+        # Redirect to Frontend with Token
+        return RedirectResponse(f"{frontend_url}/auth/callback?token={jwt_token}")
+
+
+@router.get("/connect/{platform}")
 async def connect_platform(
     platform: str, 
     user: User = Depends(get_optional_user)

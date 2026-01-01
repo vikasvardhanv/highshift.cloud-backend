@@ -39,9 +39,16 @@ class User(Document):
     plan_tier: str = Field(default="starter", alias="planTier")
     max_profiles: int = Field(default=5, alias="maxProfiles")
 
+    # New Auth Fields
+    email: Optional[str] = Field(None, unique=True)
+    password_hash: Optional[str] = Field(None, alias="passwordHash")
+    google_id: Optional[str] = Field(None, alias="googleId")
+
     class Settings:
         name = "users"
         indexes = [
             "apiKeyHash",
-            [("linkedAccounts.platform", 1), ("linkedAccounts.accountId", 1)]
+            [("linkedAccounts.platform", 1), ("linkedAccounts.accountId", 1)],
+            "email",
+            "googleId"
         ]
