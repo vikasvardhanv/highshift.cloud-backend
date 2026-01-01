@@ -34,6 +34,10 @@ class User(Document):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     api_keys: List[ApiKey] = Field(default=[], alias="apiKeys")
     linked_accounts: List[LinkedAccount] = Field(default=[], alias="linkedAccounts")
+    
+    # B2B / Limits
+    plan_tier: str = Field(default="starter", alias="planTier")
+    max_profiles: int = Field(default=5, alias="maxProfiles")
 
     class Settings:
         name = "users"

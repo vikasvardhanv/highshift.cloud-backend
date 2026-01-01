@@ -151,7 +151,19 @@ async def oauth_callback(
                 )
                 await user.insert()
             else:
-                # Update existing user: Remove old version of this account if exists, then add new
+                # Update existing user
+                
+                # Check if this specific account is already linked (update case)
+                existing_account = next((a for a in user.linked_accounts if a.platform == "twitter" and a.account_id == account_id), None)
+                
+                if not existing_account:
+                    # New account - Check Limits
+                    if len(user.linked_accounts) >= user.max_profiles:
+                        return RedirectResponse(
+                            url=f"{frontend_url}/auth/callback?error=Plan Limit Reached: Max {user.max_profiles} profiles allow. Upgrade to add more."
+                        )
+
+                # Remove old version if exists, then add new
                 user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "twitter" and a.account_id == account_id)]
                 user.linked_accounts.append(linked_account)
                 await user.save()
