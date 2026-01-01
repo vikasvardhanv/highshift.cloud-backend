@@ -10,7 +10,16 @@ from app.models.brand_kit import BrandKit
 from app.models.scheduled_post import ScheduledPost
 from app.models.analytics import AnalyticsSnapshot
 from app.models.oauth_state import OAuthState
-from app.routes import ai_routes, analytics_routes, auth_routes, key_routes, post_routes
+from app.routes import (
+    ai_routes, 
+    analytics_routes, 
+    auth_routes, 
+    key_routes, 
+    post_routes,
+    brand_routes,
+    schedule_routes,
+    history_routes
+)
 from app.utils.auth import get_current_user # Added import
 
 # Load environment variables
@@ -77,6 +86,9 @@ app.include_router(analytics_routes.router)
 app.include_router(auth_routes.router)
 app.include_router(key_routes.router)
 app.include_router(post_routes.router)
+app.include_router(brand_routes.router)
+app.include_router(schedule_routes.router)
+app.include_router(history_routes.router)
 
 @app.get("/health")
 async def health_check():
