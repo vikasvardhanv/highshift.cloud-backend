@@ -7,9 +7,11 @@ ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
 
 def get_fernet():
     if not ENCRYPTION_KEY:
-        # For development, generate a key if missing (NOT FOR PRODUCTION)
-        logger.warning("TOKEN_ENCRYPTION_KEY missing. Using a temporary key.")
-        return Fernet(Fernet.generate_key())
+        # Fallback to a consistent key for development/serverless if env var is missing
+        # This prevents "Invalid Token" errors when instances restart
+        # Key below is a valid Fernet key (32 url-safe base64-encoded bytes)
+        logger.warning("TOKEN_ENCRYPTION_KEY missing. Using fallback DEV key.")
+        return Fernet(b'C9W_dF7k-U7f_7o8E3r2q1w4e5r6t7y8u9i0o1p2a3s=')
     return Fernet(ENCRYPTION_KEY.encode())
 
 def encrypt_token(token: str) -> str:

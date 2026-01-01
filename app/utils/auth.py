@@ -62,8 +62,9 @@ async def get_current_user(
                 user = await User.get(user_id)
                 if user:
                     return user
-        except JWTError:
-            pass # Fallback to checking API Key if JWT fails (or could raise 401 directly)
+        except JWTError as e:
+            print(f"JWT Verification Failed: {str(e)}")
+            pass # Fallback to checking API Key
 
     # 2. Check API Key - Priority for API access
     if api_key:
