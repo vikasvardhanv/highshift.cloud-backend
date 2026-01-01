@@ -205,14 +205,18 @@ async def connect_platform(
             code_verifier, code_challenge = twitter.generate_pkce_pair()
             
             # Store verifier in DB
-            await OAuthState(state_id=state_id, code_verifier=code_verifier).insert()
+            oauth_state = OAuthState(state_id=state_id, code_verifier=code_verifier)
+            await oauth_state.insert()
             
             url = await twitter.get_auth_url(client_id, redirect_uri, state, scopes, code_challenge)
             return {"authUrl": url}
         except Exception as e:
             import traceback
-            print(f"Twitter Auth Error: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Twitter OAuth setup failed: {str(e)}")
+            error_trace = traceback.format_exc()
+            print(f"Twitter Auth Error [{type(e).__name__}]: {repr(e)}")
+            print(f"Full traceback: {error_trace}")
+            error_msg = str(e) or repr(e) or type(e).__name__
+            raise HTTPException(status_code=500, detail=f"Twitter OAuth setup failed: {error_msg}")
 
     if platform == "facebook":
         client_id = os.getenv("FACEBOOK_APP_ID")
