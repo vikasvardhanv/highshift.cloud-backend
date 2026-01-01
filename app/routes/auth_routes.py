@@ -202,6 +202,10 @@ async def connect_platform(
         scopes = os.getenv("TWITTER_SCOPES", "tweet.read,tweet.write,users.read,offline.access").split(",")
         
         try:
+            # Explicitly ensure DB is initialized (fixing CollectionWasNotInitialized)
+            from main import ensure_beanie_initialized
+            await ensure_beanie_initialized()
+            
             code_verifier, code_challenge = twitter.generate_pkce_pair()
             
             # Store verifier in DB
