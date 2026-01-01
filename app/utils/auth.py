@@ -23,7 +23,15 @@ async def get_current_user(api_key: str = Security(api_header)):
     
     hashed = hash_key(api_key)
     # Check both legacy single key and new list of keys
-    user = await User.find_one({"$or": [{"apiKeyHash": hashed}, {"apiKeys.keyHash": hashed}]})
+    try:
+        user = await User.find_one({"$or": [{"apiKeyHash": hashed}, {"apiKeys.keyHash": hashed}]})
+    except Exception as e:
+        # Catch Pydantic/Beanie validation errors if DB data is malformed
+        print(f"Auth Error (User Load Failed): {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed (Invalid User Data)"
+        )
     
     if not user:
         raise HTTPException(

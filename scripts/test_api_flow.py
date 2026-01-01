@@ -63,6 +63,9 @@ def main():
     test_user = {
         "_id": test_user_id,
         "email": "test_bot@highshift.ai",
+        "apiKeyHash": "legacy_dummy_" + uuid.uuid4().hex, # REQUIRED by User model
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
         "apiKeys": [{
             "id": str(uuid.uuid4()),
             "name": "E2E Test Key",
@@ -76,7 +79,8 @@ def main():
             "username": "TestBot",
             "displayName": "Test Bot Account",
             "accessTokenEnc": "mock_token",
-            "created_at": datetime.utcnow()
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
         }],
         "maxProfiles": 5,
         "planTier": "starter"
