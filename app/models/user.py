@@ -17,7 +17,7 @@ class LinkedAccount(BaseModel):
     raw_profile: Optional[dict] = Field(None, alias="rawProfile")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    profile_name: Optional[str] = Field(None, alias="profileName")  # NEW: Link to profile
+    profile_name: Optional[str] = Field(None, alias="profileName")
 
     class Settings:
         name = "linked_accounts"
@@ -31,7 +31,7 @@ class ApiKey(BaseModel):
 
 class Profile(BaseModel):
     """A named profile to group social accounts (e.g., 'business', 'personal')."""
-    name: str  # Unique per user, case-sensitive
+    name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class User(Document):
@@ -40,7 +40,7 @@ class User(Document):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     api_keys: List[ApiKey] = Field(default=[], alias="apiKeys")
     linked_accounts: List[LinkedAccount] = Field(default=[], alias="linkedAccounts")
-    profiles: List[Profile] = Field(default=[], alias="profiles")  # NEW
+    profiles: List[Profile] = Field(default=[], alias="profiles")
     
     # B2B / Limits
     plan_tier: str = Field(default="starter", alias="planTier")
@@ -55,8 +55,7 @@ class User(Document):
         name = "users"
         indexes = [
             "apiKeyHash",
-            [(("linkedAccounts.platform", 1), ("linkedAccounts.accountId", 1))],
+            [("linkedAccounts.platform", 1), ("linkedAccounts.accountId", 1)],
             "email",
             "googleId"
         ]
-
