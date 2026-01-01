@@ -192,15 +192,27 @@ async def connect_platform(
     if platform == "twitter":
         client_id = os.getenv("TWITTER_CLIENT_ID")
         redirect_uri = os.getenv("TWITTER_REDIRECT_URI")
+        
+        # Validate required environment variables
+        if not client_id:
+            raise HTTPException(status_code=500, detail="TWITTER_CLIENT_ID not configured")
+        if not redirect_uri:
+            raise HTTPException(status_code=500, detail="TWITTER_REDIRECT_URI not configured")
+        
         scopes = os.getenv("TWITTER_SCOPES", "tweet.read,tweet.write,users.read,offline.access").split(",")
         
-        code_verifier, code_challenge = twitter.generate_pkce_pair()
-        
-        # Store verifier in DB
-        await OAuthState(state_id=state_id, code_verifier=code_verifier).insert()
-        
-        url = await twitter.get_auth_url(client_id, redirect_uri, state, scopes, code_challenge)
-        return {"authUrl": url}
+        try:
+            code_verifier, code_challenge = twitter.generate_pkce_pair()
+            
+            # Store verifier in DB
+            await OAuthState(state_id=state_id, code_verifier=code_verifier).insert()
+            
+            url = await twitter.get_auth_url(client_id, redirect_uri, state, scopes, code_challenge)
+            return {"authUrl": url}
+        except Exception as e:
+            import traceback
+            print(f"Twitter Auth Error: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Twitter OAuth setup failed: {str(e)}")
 
     if platform == "facebook":
         client_id = os.getenv("FACEBOOK_APP_ID")
