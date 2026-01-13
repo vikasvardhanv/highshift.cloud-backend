@@ -194,3 +194,39 @@ async def upload_and_post(
     
     return await multi_platform_post(req, user)
 
+@router.post("/media-upload")
+async def upload_media_only(
+    files: List[UploadFile] = File(...),
+    user: User = Depends(get_current_user)
+):
+    """
+    Upload media files and return their public URLs (for scheduling or drafts).
+    """
+    import shutil
+    import uuid
+    import os
+    
+    upload_dir = "app/static/uploads"
+    if not os.path.exists(upload_dir):
+        os.makedirs(upload_dir, exist_ok=True)
+        
+    uploaded_urls = []
+    
+    for f in files:
+        ext = f.filename.split('.')[-1] if '.' in f.filename else "jpg"
+        filename = f"{uuid.uuid4()}.{ext}"
+        file_path = os.path.join(upload_dir, filename)
+        
+        try:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(f.file, buffer)
+            
+            # Construct URL
+            domain = os.getenv("API_BASE_URL", "http://localhost:3000") 
+            public_url = f"{domain}/static/uploads/{filename}"
+            uploaded_urls.append(public_url)
+        except Exception as e:
+            logger.error(f"Failed to upload file {f.filename}: {e}")
+            
+    return {"urls": uploaded_urls}
+

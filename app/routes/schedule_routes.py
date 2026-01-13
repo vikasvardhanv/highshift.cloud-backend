@@ -27,26 +27,29 @@ async def create_schedule(
     content = payload.get("content")
     accounts = payload.get("accounts", []) # List of {platform, accountId}
     scheduled_time_str = payload.get("scheduledFor") # ISO string
-    media_urls = payload.get("media", [])  # Optional media URLs
+    media_urls = payload.get("media", [])  # List of URLs (images/videos)
     
-    if not content or not accounts or not scheduled_time_str:
-        raise HTTPException(status_code=400, detail="Missing required fields")
+    if not content and not media_urls:
+         raise HTTPException(status_code=400, detail="Content or Media is required")
+         
+    if not accounts or not scheduled_time_str:
+        raise HTTPException(status_code=400, detail="Missing accounts or scheduled time")
 
     try:
         dt = datetime.datetime.fromisoformat(scheduled_time_str.replace("Z", "+00:00"))
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format")
 
-    # In a real app, 'target_accounts' would check if these accounts actually belong to the user
-    # For now we assume they are valid if the user passed them (MVP)
+    # Validating accounts structure roughly or letting Pydantic handle it via AccountTarget
+    from app.models.scheduled_post import AccountTarget
     
     post = ScheduledPost(
         user_id=user.id,
-        content=content,
-        target_accounts=accounts, # Assuming schema matches or we adapt it
-        scheduled_time=dt,
-        media_urls=media_urls,
-        status="scheduled"
+        content=content or "",
+        accounts=[AccountTarget(**acc) for acc in accounts],
+        scheduled_for=dt,
+        media=media_urls,
+        status="pending"
     )
     await post.insert()
     
