@@ -116,7 +116,22 @@ async def google_callback(code: str, state: str):
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
     backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'http://localhost:3000')}/auth/google/callback"
-    frontend_url = os.getenv("CORS_ORIGINS", "").split(",")[0] or "http://localhost:5173"
+    
+    # DETERMINE FRONTEND URL
+    # Priority:
+    # 1. FRONTEND_URL env var (Explicit override)
+    # 2. CORS_ORIGINS (Split by comma, take first)
+    # 3. Default to localhost
+    
+    frontend_url = os.getenv("FRONTEND_URL")
+    if not frontend_url:
+        origins = os.getenv("CORS_ORIGINS", "").split(",")
+        frontend_url = origins[0] if origins and origins[0] else "http://localhost:5173"
+
+    # Fix: If production and 'http' is found in CORS_ORIGINS but not localhost, force HTTPS
+    if "highshift.cloud" in frontend_url and frontend_url.startswith("http://"):
+        frontend_url = frontend_url.replace("http://", "https://")
+
 
     async with httpx.AsyncClient() as client:
         # Exchange code
@@ -259,7 +274,22 @@ async def oauth_callback(
     """
     Handle the OAuth redirection and exchange code for tokens.
     """
-    frontend_url = os.getenv("CORS_ORIGINS", "").split(",")[0] or "http://localhost:5173"
+    
+    # DETERMINE FRONTEND URL
+    # Priority:
+    # 1. FRONTEND_URL env var (Explicit override)
+    # 2. CORS_ORIGINS (Split by comma, take first)
+    # 3. Default to localhost
+    
+    frontend_url = os.getenv("FRONTEND_URL")
+    if not frontend_url:
+        origins = os.getenv("CORS_ORIGINS", "").split(",")
+        frontend_url = origins[0] if origins and origins[0] else "http://localhost:5173"
+
+    # Fix: If production and 'http' is found in CORS_ORIGINS but not localhost, force HTTPS
+    if "highshift.cloud" in frontend_url and frontend_url.startswith("http://"):
+        frontend_url = frontend_url.replace("http://", "https://")
+
 
     # Handle Cancellation / Errors
     if error:
