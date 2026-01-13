@@ -352,6 +352,138 @@ async def oauth_callback(
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
         # Fallback for other platforms (similar logic needed)
+        if platform == "facebook":
+            # 1. Exchange code
+            token_data = await facebook.exchange_code(
+                client_id=os.getenv("FACEBOOK_APP_ID"),
+                client_secret=os.getenv("FACEBOOK_APP_SECRET"),
+                redirect_uri=os.getenv("FACEBOOK_REDIRECT_URI"),
+                code=code
+            )
+            access_token = token_data.get("access_token")
+            
+            # 2. Get profile
+            profile = await facebook.get_me(access_token)
+            account_id = profile.get("id")
+            username = profile.get("name") # FB doesn't have username like Twitter, use name
+            display_name = profile.get("name")
+            
+            # 3. Create LinkedAccount
+            linked_account = LinkedAccount(
+                platform="facebook",
+                accountId=account_id,
+                username=username,
+                displayName=display_name,
+                accessTokenEnc=encrypt_token(access_token),
+                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 5184000)), # ~60 days default long-lived
+                rawProfile=profile
+            )
+            
+            # 4. Find/Create User & Save (Reusable Logic)
+            # ... (Refactoring common logic below would be better, but for now inlining)
+            
+            # Find User
+            user = None
+            if user_id_from_state:
+                user = await User.get(user_id_from_state)
+            
+            if not user:
+                 user = await User.find_one({
+                    "linkedAccounts.platform": "facebook",
+                    "linkedAccounts.accountId": account_id
+                })
+
+            api_key_to_return = None
+            if not user:
+                api_key_to_return = f"hs_{uuid.uuid4().hex}"
+                user = User(
+                    apiKeyHash=hash_key(api_key_to_return),
+                    linkedAccounts=[linked_account]
+                )
+                await user.insert()
+            else:
+                existing_account = next((a for a in user.linked_accounts if a.platform == "facebook" and a.account_id == account_id), None)
+                if not existing_account and len(user.linked_accounts) >= user.max_profiles:
+                     return RedirectResponse(
+                            url=f"{frontend_url}/auth/callback?error=Plan Limit Reached"
+                        )
+                user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "facebook" and a.account_id == account_id)]
+                user.linked_accounts.append(linked_account)
+                await user.save()
+
+            # Redirect
+            jwt_token = create_access_token(data={"sub": str(user.id)})
+            redirect_params = f"platform=facebook&accountId={account_id}&token={jwt_token}"
+            if api_key_to_return:
+                redirect_params += f"&apiKey={api_key_to_return}"
+            return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
+
+        if platform == "instagram":
+            # 1. Exchange code
+            token_data = await instagram.exchange_code(
+                client_id=os.getenv("FACEBOOK_APP_ID"), # Insta uses FB App ID
+                client_secret=os.getenv("FACEBOOK_APP_SECRET"),
+                redirect_uri=os.getenv("INSTAGRAM_REDIRECT_URI"),
+                code=code
+            )
+            access_token = token_data.get("access_token")
+            
+            # 2. Get profile
+            profile = await instagram.get_me(access_token)
+            account_id = profile.get("id")
+            username = profile.get("username") 
+            display_name = profile.get("name") or username
+            
+            # 3. Create LinkedAccount
+            linked_account = LinkedAccount(
+                platform="instagram",
+                accountId=account_id,
+                username=username,
+                displayName=display_name,
+                accessTokenEnc=encrypt_token(access_token),
+                # Insta tokens are usually long-lived (60 days) if exchanged properly, 
+                # but standard OAuth code flow gives short-lived (1 hr) unless exchanged again.
+                # Assuming standard flow for now.
+                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 3600)),
+                rawProfile=profile
+            )
+            
+            # Find User
+            user = None
+            if user_id_from_state:
+                user = await User.get(user_id_from_state)
+            
+            if not user:
+                 user = await User.find_one({
+                    "linkedAccounts.platform": "instagram",
+                    "linkedAccounts.accountId": account_id
+                })
+
+            api_key_to_return = None
+            if not user:
+                api_key_to_return = f"hs_{uuid.uuid4().hex}"
+                user = User(
+                    apiKeyHash=hash_key(api_key_to_return),
+                    linkedAccounts=[linked_account]
+                )
+                await user.insert()
+            else:
+                existing_account = next((a for a in user.linked_accounts if a.platform == "instagram" and a.account_id == account_id), None)
+                if not existing_account and len(user.linked_accounts) >= user.max_profiles:
+                     return RedirectResponse(
+                            url=f"{frontend_url}/auth/callback?error=Plan Limit Reached"
+                        )
+                user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "instagram" and a.account_id == account_id)]
+                user.linked_accounts.append(linked_account)
+                await user.save()
+
+            # Redirect
+            jwt_token = create_access_token(data={"sub": str(user.id)})
+            redirect_params = f"platform=instagram&accountId={account_id}&token={jwt_token}"
+            if api_key_to_return:
+                redirect_params += f"&apiKey={api_key_to_return}"
+            return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
+
         return RedirectResponse(url=f"{frontend_url}/auth/callback?error=unsupported_platform")
 
     except Exception as e:

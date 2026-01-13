@@ -49,3 +49,15 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         )
         pub_res.raise_for_status()
         return pub_res.json()
+
+async def get_me(access_token: str):
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            "https://graph.facebook.com/v24.0/me",
+            params={
+                "fields": "id,name,username,account_type,media_count",
+                "access_token": access_token
+            }
+        )
+        res.raise_for_status()
+        return res.json()

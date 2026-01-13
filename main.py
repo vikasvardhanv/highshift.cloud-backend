@@ -103,6 +103,14 @@ app.include_router(legacy_routes.router)
 app.include_router(profile_routes.router)
 app.include_router(connect_router)  # Alias for /connect/{platform}/callback
 
+from fastapi.staticfiles import StaticFiles
+# Create static directory if not exists (handled by mkdir command, but good practice to have logic here if needed)
+if not os.path.exists("app/static/uploads"):
+    os.makedirs("app/static/uploads")
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 @app.get("/health")
 async def health_check():
     global db_initialized

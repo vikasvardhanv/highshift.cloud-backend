@@ -40,3 +40,15 @@ async def post_to_page(access_token: str, page_id: str, message: str, link: str 
         )
         res.raise_for_status()
         return res.json()
+
+async def get_me(access_token: str):
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            "https://graph.facebook.com/v24.0/me",
+            params={
+                "fields": "id,name,email",
+                "access_token": access_token
+            }
+        )
+        res.raise_for_status()
+        return res.json()

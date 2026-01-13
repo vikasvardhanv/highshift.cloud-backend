@@ -63,15 +63,72 @@ async def refresh_access_token(client_id: str, client_secret: str, refresh_token
         res.raise_for_status()
         return res.json()
 
-async def post_tweet(access_token: str, text: str):
+async def upload_media(access_token: str, file_path: str = None, media_data: bytes = None):
+    """
+    Upload media to Twitter (v1.1 API) and return media_id.
+    Requires either file_path or media_data (bytes).
+    """
+    import os
+    
+    url = "https://upload.twitter.com/1.1/media/upload.json"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    
+    data = None
+    files = None
+    
+    if file_path:
+        # Read file
+        files = {"media": open(file_path, "rb")}
+    elif media_data:
+        files = {"media": media_data}
+    else:
+        raise ValueError("Either file_path or media_data must be provided")
+
     async with httpx.AsyncClient() as client:
+        # 1. INIT
+        init_data = {
+            "command": "INIT",
+            "total_bytes": os.path.getsize(file_path) if file_path else len(media_data),
+            "media_type": "image/jpeg" # Defaulting to jpeg, should ideally detect
+        }
+        res = await client.post(url, headers=headers, data=init_data)
+        res.raise_for_status()
+        media_id = res.json()["media_id_string"]
+        
+        # 2. APPEND
+        # Twitter requires multipart/form-data for APPEND
+        append_data = {
+            "command": "APPEND",
+            "media_id": media_id,
+            "segment_index": 0
+        }
+        # Note: For larger files, we need chunked upload. Assuming small files for now (< 5MB)
+        res = await client.post(url, headers=headers, data=append_data, files=files)
+        res.raise_for_status()
+        
+        # 3. FINALIZE
+        finalize_data = {
+            "command": "FINALIZE",
+            "media_id": media_id
+        }
+        res = await client.post(url, headers=headers, data=finalize_data)
+        res.raise_for_status()
+        
+        return media_id
+
+async def post_tweet(access_token: str, text: str, media_ids: list = None):
+    async with httpx.AsyncClient() as client:
+        payload = {"text": text}
+        if media_ids:
+            payload["media"] = {"media_ids": media_ids}
+            
         res = await client.post(
             "https://api.twitter.com/2/tweets",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json"
             },
-            json={"text": text}
+            json=payload
         )
         res.raise_for_status()
         return res.json()
