@@ -226,89 +226,113 @@ async def upload_media_only(
     user: User = Depends(get_current_user)
 ):
     """
-    Upload media files and return their public URLs (for scheduling or drafts).
-    On serverless (e.g., Vercel), filesystem is read-only except /tmp.
-    This endpoint attempts to save to /tmp and returns base64 data URLs as fallback.
-    
-    For production with Instagram/Facebook (which require public URLs),
-    configure CLOUDINARY_URL or AWS S3 in environment variables.
+    Upload media files, persist them in the database (Media model), and return their URLs.
+    Handles Cloudinary (if configured) or base64 storage as fallback.
     """
     import shutil
     import uuid
     import os
     import base64
+    from app.models.media import Media
     
     uploaded_urls = []
-    local_paths = []  # For platforms like Twitter that support file uploads
+    local_paths = [] 
     
-    # Check if Cloudinary is configured
     cloudinary_url = os.getenv("CLOUDINARY_URL")
     
     for f in files:
         try:
-            # Read file content
             content = await f.read()
             ext = f.filename.split('.')[-1] if '.' in f.filename else "jpg"
             filename = f"{uuid.uuid4()}.{ext}"
             
+            # Defaults
+            final_cloud_url = None
+            final_data_url = None
+            final_local_path = None
+            
+            # 1. Try Cloudinary
             if cloudinary_url:
-                # Use Cloudinary for cloud storage
                 try:
                     import cloudinary
                     import cloudinary.uploader
-                    
-                    # Configure from URL
                     cloudinary.config(cloudinary_url=cloudinary_url)
-                    
-                    # Upload to Cloudinary
                     result = cloudinary.uploader.upload(
                         content,
                         public_id=filename.rsplit('.', 1)[0],
                         resource_type="auto"
                     )
-                    uploaded_urls.append(result['secure_url'])
-                    logger.info(f"Uploaded to Cloudinary: {result['secure_url']}")
-                    continue
-                except ImportError:
-                    logger.warning("Cloudinary package not installed. Falling back to local storage.")
-                except Exception as cloud_err:
-                    logger.error(f"Cloudinary upload failed: {cloud_err}")
+                    final_cloud_url = result['secure_url']
+                    uploaded_urls.append(final_cloud_url)
+                except Exception as e:
+                    logger.error(f"Cloudinary upload failed: {e}")
+
+            # 2. If no cloud URL, use Base64 (Data URL) storage
+            if not final_cloud_url:
+                mime_type = f.content_type or f"image/{ext}"
+                base64_data = base64.b64encode(content).decode('utf-8')
+                final_data_url = f"data:{mime_type};base64,{base64_data}"
+                uploaded_urls.append(final_data_url)
             
-            # Try /tmp directory (works on serverless)
+            # 3. Handle Local Path (for Twitter/server-side clients that might need file access)
+            # On serverless, this is ephemeral (/tmp), but better than nothing for immediate processing
             tmp_dir = "/tmp/uploads"
             try:
                 os.makedirs(tmp_dir, exist_ok=True)
                 file_path = os.path.join(tmp_dir, filename)
-                
                 with open(file_path, "wb") as buffer:
                     buffer.write(content)
-                
+                final_local_path = file_path
                 local_paths.append(file_path)
-                
-                # For Twitter, we can use the local path directly
-                # For other platforms, they need a public URL
-                # Generate a base64 data URL as fallback for preview purposes
-                mime_type = f.content_type or f"image/{ext}"
-                base64_data = base64.b64encode(content).decode('utf-8')
-                data_url = f"data:{mime_type};base64,{base64_data}"
-                
-                uploaded_urls.append(data_url)
-                logger.info(f"Saved file to {file_path}, generated data URL")
-                
-            except OSError as e:
-                logger.warning(f"Failed to save to /tmp: {e}, using data URL only")
-                # Generate base64 data URL as last resort
-                mime_type = f.content_type or f"image/{ext}"
-                base64_data = base64.b64encode(content).decode('utf-8')
-                data_url = f"data:{mime_type};base64,{base64_data}"
-                uploaded_urls.append(data_url)
-                
+            except Exception:
+                pass
+
+            # 4. Save to Database
+            media_doc = Media(
+                userId=str(user.id),
+                filename=f.filename,
+                contentType=f.content_type or f"image/{ext}",
+                fileType="image" if "image" in (f.content_type or "") else "video",
+                cloudUrl=final_cloud_url,
+                dataUrl=final_data_url, # Warning: This can be large. Ideally use S3/GridFS.
+                localPath=final_local_path,
+                sizeBytes=len(content)
+            )
+            await media_doc.insert()
+            
         except Exception as e:
             logger.error(f"Failed to process file {f.filename}: {e}")
             
     return {
         "urls": uploaded_urls,
-        "localPaths": local_paths,  # For Twitter uploads
-        "warning": "For Instagram/Facebook posting, configure CLOUDINARY_URL for public URLs" if not cloudinary_url else None
+        "local_paths": local_paths,
+        "cloudinary_configured": bool(cloudinary_url)
     }
 
+@router.get("/media/library")
+async def get_media_library(
+    limit: int = 50,
+    skip: int = 0,
+    user: User = Depends(get_current_user)
+):
+    """
+    Fetch user's media library.
+    """
+    from app.models.media import Media
+    
+    docs = await Media.find(
+        Media.user_id == str(user.id)
+    ).sort(-Media.created_at).limit(limit).skip(skip).to_list()
+    
+    return {
+        "media": [
+            {
+                "id": str(m.id),
+                "url": m.get_display_url(),
+                "filename": m.filename,
+                "type": m.file_type,
+                "created_at": m.created_at
+            }
+            for m in docs
+        ]
+    }

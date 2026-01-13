@@ -10,6 +10,7 @@ from app.models.brand_kit import BrandKit
 from app.models.scheduled_post import ScheduledPost
 from app.models.analytics import AnalyticsSnapshot
 from app.models.oauth_state import OAuthState
+from app.models.media import Media
 from app.routes import (
     ai_routes, 
     analytics_routes, 
@@ -55,7 +56,8 @@ async def ensure_beanie_initialized():
                 BrandKit,
                 ScheduledPost,
                 AnalyticsSnapshot,
-                OAuthState
+                OAuthState,
+                Media
             ]
         )
         db_initialized = True
