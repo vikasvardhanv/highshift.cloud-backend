@@ -90,13 +90,15 @@ async def google_login():
     # Actually, standard Google Login usually uses a simpler scope: openid email profile
     
     # We'll use a backend callback for security, then redirect to frontend
-    backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'http://localhost:3000')}/auth/google/callback"
+    backend_url = os.getenv("BACKEND_URL")
+    if not backend_url:
+        # Fallback for local development if not set, but warn
+        backend_url = "http://localhost:3000"
+        
+    backend_redirect_uri = f"{backend_url}/auth/google/callback"
     
     state = str(uuid.uuid4())
     scopes = ["openid", "email", "profile"]
-    
-    # Using the existing youtube helper but overriding params, or just construct URL manually
-    # Just constructing manually for simplicity as platform helpers are specific
     
     scope_str = " ".join(scopes)
     auth_url = (
@@ -105,7 +107,7 @@ async def google_login():
         f"scope={scope_str}&state={state}&access_type=offline&prompt=consent"
     )
     
-    return {"authUrl": auth_url}
+    return RedirectResponse(auth_url)
 
 @router.get("/google/callback")
 async def google_callback(code: str, state: str):
