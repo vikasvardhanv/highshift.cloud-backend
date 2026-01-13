@@ -41,6 +41,24 @@ async def post_to_page(access_token: str, page_id: str, message: str, link: str 
         res.raise_for_status()
         return res.json()
 
+async def post_photo(access_token: str, page_id: str, message: str, image_url: str):
+    """
+    Post a photo to a Facebook Page using an image URL.
+    """
+    async with httpx.AsyncClient() as client:
+        params = {
+            "url": image_url,
+            "caption": message,
+            "access_token": access_token
+        }
+        
+        res = await client.post(
+            f"https://graph.facebook.com/v24.0/{page_id}/photos",
+            params=params
+        )
+        res.raise_for_status()
+        return res.json()
+
 async def get_me(access_token: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(

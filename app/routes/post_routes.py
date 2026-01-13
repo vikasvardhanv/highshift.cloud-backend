@@ -7,6 +7,7 @@ from app.platforms import instagram, twitter, facebook, linkedin
 from app.services.token_service import decrypt_token
 from app.utils.logger import logger
 import json
+import httpx
 
 router = APIRouter(prefix="/post", tags=["Publishing"])
 
@@ -97,18 +98,43 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                 results.append({"platform": "instagram", "status": "success", "id": res.get("id")})
                 
             elif target.platform == "facebook":
-                # Facebook supports photos edge, but for simplicity using feed with link if no files
-                # If we have media, ideally use photos edge. 
-                # For now using the basic implementation: Text + Link (if strictly URL)
-                # Improving: If we have media URL, send it as link? 
-                # Facebook feed "link" parameter expects a webpage, but "picture" or "source" is for images.
-                # Staying safe: sending content.
-                res = await facebook.post_to_page(token, target.accountId, req.content)
+                if req.media:
+                    # Use first image for now
+                    res = await facebook.post_photo(token, target.accountId, req.content, req.media[0])
+                else:
+                    res = await facebook.post_to_page(token, target.accountId, req.content)
                 results.append({"platform": "facebook", "status": "success", "id": res.get("id")})
                 
             elif target.platform == "linkedin":
-                # LinkedIn URN needed, normally stored in rawProfile or as account_id
-                res = await linkedin.post_to_profile(token, target.accountId, req.content)
+                if req.media:
+                    # 1. Register Upload
+                    reg_res = await linkedin.register_upload(token, target.accountId)
+                    upload_url = reg_res['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
+                    asset_urn = reg_res['value']['asset']
+                    
+                    # 2. Upload Image
+                    image_data = None
+                    # Prefer local path if available to avoid network roundtrip
+                    if req.local_media_paths:
+                        with open(req.local_media_paths[0], "rb") as f:
+                            image_data = f.read()
+                    elif req.media:
+                        # Download from URL
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.get(req.media[0])
+                            resp.raise_for_status()
+                            image_data = resp.content
+                            
+                    if image_data:
+                        await linkedin.upload_image(upload_url, image_data, token)
+                        
+                        # 3. Create Post
+                        res = await linkedin.post_with_media(token, target.accountId, req.content, asset_urn)
+                    else:
+                        # Fallback if binary data loading failed
+                        res = await linkedin.post_to_profile(token, target.accountId, req.content)
+                else:
+                    res = await linkedin.post_to_profile(token, target.accountId, req.content)
                 results.append({"platform": "linkedin", "status": "success", "id": res.get("id")})
                 
             else:

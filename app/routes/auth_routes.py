@@ -251,18 +251,28 @@ async def connect_platform(
 @router.get("/{platform}/callback")
 async def oauth_callback(
     platform: str,
-    code: str = Query(...),
-    state: str = Query(...),
+    code: str = Query(None),
+    state: str = Query(None),
+    error: str = Query(None),
+    denied: str = Query(None) # Twitter sometimes sends 'denied' on cancellation
 ):
     """
     Handle the OAuth redirection and exchange code for tokens.
     """
+    frontend_url = os.getenv("CORS_ORIGINS", "").split(",")[0] or "http://localhost:5173"
+
+    # Handle Cancellation / Errors
+    if error:
+        return RedirectResponse(f"{frontend_url}/dashboard?error={error}")
+    if denied:
+        return RedirectResponse(f"{frontend_url}/dashboard?error=access_denied")
+    if not code:
+         return RedirectResponse(f"{frontend_url}/dashboard?error=no_code_provided")
+         
     state_parts = state.split(":")
     state_id = state_parts[0]
     user_id_from_state = state_parts[1] if len(state_parts) > 1 else None
     
-    frontend_url = os.getenv("CORS_ORIGINS", "").split(",")[0] or "http://localhost:5173"
-
     try:
         if platform == "twitter":
             # 1. Retrieve verifier
@@ -501,7 +511,13 @@ from fastapi import APIRouter as ConnectRouter
 connect_router = APIRouter(prefix="/connect", tags=["Connect Alias"], dependencies=[Depends(ensure_db)])
 
 @connect_router.get("/{platform}/callback")
-async def connect_oauth_callback(platform: str, code: str = Query(...), state: str = Query(...)):
+async def connect_oauth_callback(
+    platform: str, 
+    code: str = Query(None), 
+    state: str = Query(None),
+    error: str = Query(None),
+    denied: str = Query(None)
+):
     """Alias for /auth/{platform}/callback - forwards to main oauth_callback."""
-    return await oauth_callback(platform, code, state)
+    return await oauth_callback(platform, code, state, error, denied)
 
