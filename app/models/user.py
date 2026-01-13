@@ -17,7 +17,7 @@ class LinkedAccount(BaseModel):
     raw_profile: Optional[dict] = Field(None, alias="rawProfile")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    profile_name: Optional[str] = Field(None, alias="profileName")
+    profile_id: Optional[str] = Field(None, alias="profileId") # ID of the Profile this account belongs to
 
     class Settings:
         name = "linked_accounts"
@@ -31,6 +31,7 @@ class ApiKey(BaseModel):
 
 class Profile(BaseModel):
     """A named profile to group social accounts (e.g., 'business', 'personal')."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

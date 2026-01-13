@@ -187,6 +187,7 @@ async def google_callback(code: str, state: str):
 @router.get("/connect/{platform}")
 async def connect_platform(
     platform: str, 
+    profile_id: str = Query(None), # Add profile_id support
     user: User = Depends(get_optional_user)
 ):
     """
@@ -194,8 +195,12 @@ async def connect_platform(
     """
     state_id = str(uuid.uuid4())
     state_payload = state_id
+    
+    # Store profile_id in state if present
     if user:
         state_payload = f"{state_id}:{str(user.id)}"
+        if profile_id:
+            state_payload += f":{profile_id}"
     
     state = state_payload
     
@@ -302,6 +307,7 @@ async def oauth_callback(
     state_parts = state.split(":")
     state_id = state_parts[0]
     user_id_from_state = state_parts[1] if len(state_parts) > 1 else None
+    profile_id_from_state = state_parts[2] if len(state_parts) > 2 else None
     
     try:
         if platform == "twitter":
@@ -337,7 +343,8 @@ async def oauth_callback(
                 accessTokenEnc=encrypt_token(access_token),
                 refreshTokenEnc=encrypt_token(token_data.get("refresh_token")) if token_data.get("refresh_token") else None,
                 expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 7200)),
-                rawProfile=profile
+                rawProfile=profile,
+                profileId=profile_id_from_state # Assign profile
             )
 
             # 4. Find or Create User
@@ -418,7 +425,8 @@ async def oauth_callback(
                 displayName=display_name,
                 accessTokenEnc=encrypt_token(access_token),
                 expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 5184000)), # ~60 days default long-lived
-                rawProfile=profile
+                rawProfile=profile,
+                profileId=profile_id_from_state
             )
             
             # 4. Find/Create User & Save (Reusable Logic)
@@ -487,7 +495,8 @@ async def oauth_callback(
                 # but standard OAuth code flow gives short-lived (1 hr) unless exchanged again.
                 # Assuming standard flow for now.
                 expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 3600)),
-                rawProfile=profile
+                rawProfile=profile,
+                profileId=profile_id_from_state
             )
             
             # Find User
