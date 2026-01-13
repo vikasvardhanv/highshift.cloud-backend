@@ -227,32 +227,88 @@ async def upload_media_only(
 ):
     """
     Upload media files and return their public URLs (for scheduling or drafts).
+    On serverless (e.g., Vercel), filesystem is read-only except /tmp.
+    This endpoint attempts to save to /tmp and returns base64 data URLs as fallback.
+    
+    For production with Instagram/Facebook (which require public URLs),
+    configure CLOUDINARY_URL or AWS S3 in environment variables.
     """
     import shutil
     import uuid
     import os
+    import base64
     
-    upload_dir = "app/static/uploads"
-    if not os.path.exists(upload_dir):
-        os.makedirs(upload_dir, exist_ok=True)
-        
     uploaded_urls = []
+    local_paths = []  # For platforms like Twitter that support file uploads
+    
+    # Check if Cloudinary is configured
+    cloudinary_url = os.getenv("CLOUDINARY_URL")
     
     for f in files:
-        ext = f.filename.split('.')[-1] if '.' in f.filename else "jpg"
-        filename = f"{uuid.uuid4()}.{ext}"
-        file_path = os.path.join(upload_dir, filename)
-        
         try:
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(f.file, buffer)
+            # Read file content
+            content = await f.read()
+            ext = f.filename.split('.')[-1] if '.' in f.filename else "jpg"
+            filename = f"{uuid.uuid4()}.{ext}"
             
-            # Construct URL
-            domain = os.getenv("API_BASE_URL", "http://localhost:3000") 
-            public_url = f"{domain}/static/uploads/{filename}"
-            uploaded_urls.append(public_url)
+            if cloudinary_url:
+                # Use Cloudinary for cloud storage
+                try:
+                    import cloudinary
+                    import cloudinary.uploader
+                    
+                    # Configure from URL
+                    cloudinary.config(cloudinary_url=cloudinary_url)
+                    
+                    # Upload to Cloudinary
+                    result = cloudinary.uploader.upload(
+                        content,
+                        public_id=filename.rsplit('.', 1)[0],
+                        resource_type="auto"
+                    )
+                    uploaded_urls.append(result['secure_url'])
+                    logger.info(f"Uploaded to Cloudinary: {result['secure_url']}")
+                    continue
+                except ImportError:
+                    logger.warning("Cloudinary package not installed. Falling back to local storage.")
+                except Exception as cloud_err:
+                    logger.error(f"Cloudinary upload failed: {cloud_err}")
+            
+            # Try /tmp directory (works on serverless)
+            tmp_dir = "/tmp/uploads"
+            try:
+                os.makedirs(tmp_dir, exist_ok=True)
+                file_path = os.path.join(tmp_dir, filename)
+                
+                with open(file_path, "wb") as buffer:
+                    buffer.write(content)
+                
+                local_paths.append(file_path)
+                
+                # For Twitter, we can use the local path directly
+                # For other platforms, they need a public URL
+                # Generate a base64 data URL as fallback for preview purposes
+                mime_type = f.content_type or f"image/{ext}"
+                base64_data = base64.b64encode(content).decode('utf-8')
+                data_url = f"data:{mime_type};base64,{base64_data}"
+                
+                uploaded_urls.append(data_url)
+                logger.info(f"Saved file to {file_path}, generated data URL")
+                
+            except OSError as e:
+                logger.warning(f"Failed to save to /tmp: {e}, using data URL only")
+                # Generate base64 data URL as last resort
+                mime_type = f.content_type or f"image/{ext}"
+                base64_data = base64.b64encode(content).decode('utf-8')
+                data_url = f"data:{mime_type};base64,{base64_data}"
+                uploaded_urls.append(data_url)
+                
         except Exception as e:
-            logger.error(f"Failed to upload file {f.filename}: {e}")
+            logger.error(f"Failed to process file {f.filename}: {e}")
             
-    return {"urls": uploaded_urls}
+    return {
+        "urls": uploaded_urls,
+        "localPaths": local_paths,  # For Twitter uploads
+        "warning": "For Instagram/Facebook posting, configure CLOUDINARY_URL for public URLs" if not cloudinary_url else None
+    }
 

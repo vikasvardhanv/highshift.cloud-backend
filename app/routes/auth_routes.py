@@ -80,6 +80,37 @@ async def login(user_data: UserLogin):
         "token_type": "bearer"
     }
 
+@router.get("/me")
+async def get_current_user_info(user: User = Depends(get_current_user)):
+    """Return the current logged-in user's information."""
+    # Derive display name from email if available
+    name = None
+    initials = "U"
+    
+    if user.email:
+        # Extract name from email (e.g., vikash.vardhan@example.com -> Vikash Vardhan)
+        email_prefix = user.email.split("@")[0]
+        # Convert underscore/dots to spaces and title case
+        name_parts = email_prefix.replace(".", " ").replace("_", " ").split()
+        name = " ".join(part.capitalize() for part in name_parts)
+        
+        # Generate initials from name parts
+        if len(name_parts) >= 2:
+            initials = (name_parts[0][0] + name_parts[-1][0]).upper()
+        elif len(name_parts) == 1:
+            initials = name_parts[0][:2].upper()
+    
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": name or "User",
+        "initials": initials,
+        "planTier": user.plan_tier,
+        "maxProfiles": user.max_profiles,
+        "linkedAccountsCount": len(user.linked_accounts),
+        "profilesCount": len(user.profiles)
+    }
+
 @router.get("/google")
 async def google_login():
     """Start Google OAuth flow for Login (not YouTube channel linking)."""
