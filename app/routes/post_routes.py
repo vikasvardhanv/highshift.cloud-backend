@@ -150,29 +150,39 @@ async def upload_and_post(
         upload_dir = "app/static/uploads"
         # Ensure dir exists (redundant check but safe)
         if not os.path.exists(upload_dir):
-            os.makedirs(upload_dir)
-            
+            try:
+                os.makedirs(upload_dir)
+            except OSError as e:
+                logger.error(f"Could not create upload directory: {e}")
+                # Fallback: Depending on needs, we might want to raise HTTPException
+                # or just continue. If we continue, file saving will fail.
+        
         for f in files:
             # Generate unique filename
             ext = f.filename.split('.')[-1] if '.' in f.filename else "jpg"
             filename = f"{uuid.uuid4()}.{ext}"
             file_path = os.path.join(upload_dir, filename)
             
-            # Save file
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(f.file, buffer)
-            
-            # Add to local paths for Twitter
-            local_paths.append(file_path)
-            
-            # Add to media URLs for others (Warning: Localhost URLs won't work for Insta/FB API)
-            # Assuming backend runs on port 3000 or similar. In prod, this should be the public domain.
-            # Using relative path? APIs need absolute http/s.
-            domain = os.getenv("API_BASE_URL", "http://localhost:3000") 
-            public_url = f"{domain}/static/uploads/{filename}"
-            media.append(public_url)
-            
-            logger.info(f"Saved file to {file_path}, Public URL: {public_url}")
+            try:
+                # Save file
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(f.file, buffer)
+                
+                # Add to local paths for Twitter
+                local_paths.append(file_path)
+                
+                # Add to media URLs for others (Warning: Localhost URLs won't work for Insta/FB API)
+                # Assuming backend runs on port 3000 or similar. In prod, this should be the public domain.
+                # Using relative path? APIs need absolute http/s.
+                domain = os.getenv("API_BASE_URL", "http://localhost:3000") 
+                public_url = f"{domain}/static/uploads/{filename}"
+                media.append(public_url)
+                
+                logger.info(f"Saved file to {file_path}, Public URL: {public_url}")
+            except OSError as e:
+                logger.error(f"Failed to save file (FileSystem Read-only?): {e}")
+                # We can't proceed with this file
+                continue
     
     # Create request and delegate to existing logic
     req = MultiPostRequest(

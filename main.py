@@ -74,18 +74,23 @@ app = FastAPI(title="HighShift AI Backend", version="1.0.0", lifespan=lifespan)
 # CORS configuration
 origins = os.getenv("CORS_ORIGINS", "*").split(",")
 
-# Fallback: If "CORS_ORIGINS" is just "*" and allow_credentials is True, 
-# some browsers block it. We should ideally list domains.
-# However, for development or broad access, we can try to allow all.
-# If you face issues, set valid domains in .env e.g. https://your-frontend.vercel.app
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Handle wildcard with credentials correctly
+if "*" in origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=".*",  # Allows all origins with credentials (DEV ONLY)
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Include Routers
 app.include_router(ai_routes.router)
@@ -104,12 +109,19 @@ app.include_router(profile_routes.router)
 app.include_router(connect_router)  # Alias for /connect/{platform}/callback
 
 from fastapi.staticfiles import StaticFiles
-# Create static directory if not exists (handled by mkdir command, but good practice to have logic here if needed)
-if not os.path.exists("app/static/uploads"):
-    os.makedirs("app/static/uploads")
+import logging
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+# Safe static file mounting for Vercel/Serverless (Read-only filesystem)
+try:
+    # Create static directory if not exists (only works if filesystem is writable)
+    if not os.path.exists("app/static/uploads"):
+        os.makedirs("app/static/uploads")
+    
+    # Mount static files
+    app.mount("/static", StaticFiles(directory="app/static"), name="static")
+except Exception as e:
+    # Log warning but don't crash the app
+    print(f"WARNING: Static file serving could not be initialized (likely read-only filesystem): {e}")
 
 @app.get("/health")
 async def health_check():
