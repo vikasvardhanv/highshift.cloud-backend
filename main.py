@@ -73,6 +73,8 @@ app = FastAPI(title="HighShift AI Backend", version="1.0.0", lifespan=lifespan)
 
 # CORS configuration
 origins = os.getenv("CORS_ORIGINS", "*").split(",")
+# Explicitly add production domains
+origins.extend(["https://highshift.cloud", "https://www.highshift.cloud"])
 
 # Handle wildcard with credentials correctly
 if "*" in origins:
