@@ -11,6 +11,7 @@ from app.models.scheduled_post import ScheduledPost
 from app.models.analytics import AnalyticsSnapshot
 from app.models.oauth_state import OAuthState
 from app.models.media import Media
+from app.models.activity import ActivityLog
 from app.routes import (
     ai_routes, 
     analytics_routes, 
@@ -20,7 +21,8 @@ from app.routes import (
     brand_routes,
     schedule_routes,
     history_routes,
-    account_routes
+    account_routes,
+    activity_routes
 )
 from app.utils.auth import get_current_user # Added import
 
@@ -57,7 +59,8 @@ async def ensure_beanie_initialized():
                 ScheduledPost,
                 AnalyticsSnapshot,
                 OAuthState,
-                Media
+                Media,
+                ActivityLog
             ]
         )
         db_initialized = True
@@ -68,8 +71,15 @@ async def ensure_beanie_initialized():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await ensure_beanie_initialized()
+    
+    # Start Scheduler
+    from app.services.scheduler_service import scheduler
+    scheduler.start()
+    
     yield
-    # Shutdown logic (if any) can go here
+    
+    # Shutdown logic
+    scheduler.stop()
 
 app = FastAPI(title="HighShift AI Backend", version="1.0.0", lifespan=lifespan)
 
@@ -106,6 +116,7 @@ app.include_router(brand_routes.router)
 app.include_router(schedule_routes.router)
 app.include_router(history_routes.router)
 app.include_router(account_routes.router)
+app.include_router(activity_routes.router)
 from app.routes import legacy_routes, profile_routes
 from app.routes.auth_routes import connect_router
 app.include_router(legacy_routes.router)
