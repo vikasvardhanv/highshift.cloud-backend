@@ -38,13 +38,20 @@ class UserLogin(BaseModel):
 
 @router.post("/register")
 async def register(user_data: UserRegister):
+    import logging
+    logger = logging.getLogger("auth")
+    logger.setLevel(logging.INFO)
+    logger.info(f"Registering user: {user_data.email}")
+
     # Check if user exists
     existing_user = await User.find_one(User.email == user_data.email)
     if existing_user:
+        logger.warning(f"Registration failed: Email {user_data.email} already exists")
         raise HTTPException(status_code=400, detail="Email already registered")
     
     # Create new user
     hashed_pwd = get_password_hash(user_data.password)
+    logger.info(f"Generated hash for {user_data.email}: {hashed_pwd}")
     api_key_str = f"hs_{uuid.uuid4().hex}"
     
     new_user = User(
@@ -66,11 +73,24 @@ async def register(user_data: UserRegister):
 
 @router.post("/login")
 async def login(user_data: UserLogin):
+    import logging
+    logger = logging.getLogger("auth")
+    logger.info(f"Login attempt for: {user_data.email}")
+
     user = await User.find_one(User.email == user_data.email)
-    if not user or not user.password_hash:
+    if not user:
+        logger.warning(f"Login failed: User {user_data.email} not found")
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+    if not user.password_hash:
+        logger.warning(f"Login failed: User {user_data.email} has no password hash (likely OAuth only)")
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    if not verify_password(user_data.password, user.password_hash):
+    is_valid = verify_password(user_data.password, user.password_hash)
+    if not is_valid:
+        logger.warning(f"Login failed: Invalid password for {user_data.email}")
+        logger.info(f"Stored Hash: {user.password_hash}")
+        # logger.info(f"Input Pwd: {user_data.password}") # SECURITY RISK: Don't log passwords
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
     access_token = create_access_token(data={"sub": str(user.id)})
@@ -648,7 +668,12 @@ async def reset_password(req: ResetPasswordRequest):
         raise HTTPException(status_code=400, detail="Token expired")
         
     # Update Password
+    import logging
+    logger = logging.getLogger("auth")
+    
     hashed_pwd = get_password_hash(req.new_password)
+    logger.info(f"Resetting password for {user.email}. New Hash: {hashed_pwd}")
+    
     user.password_hash = hashed_pwd
     user.reset_token = None
     user.reset_token_expiry = None
