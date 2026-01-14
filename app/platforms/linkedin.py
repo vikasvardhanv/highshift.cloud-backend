@@ -53,14 +53,17 @@ async def post_to_profile(access_token: str, person_urn: str, text: str):
         res.raise_for_status()
         return res.json()
 
-async def register_upload(access_token: str, person_urn: str):
+async def register_upload(access_token: str, person_urn: str, media_type: str = "image"):
     """
-    Step 1: Register the image upload to get an upload URL.
+    Step 1: Register the media upload to get an upload URL.
+    media_type: 'image' or 'video'
     """
+    recipe = "urn:li:digitalmediaRecipe:feedshare-image" if media_type == "image" else "urn:li:digitalmediaRecipe:feedshare-video"
+    
     async with httpx.AsyncClient() as client:
         body = {
             "registerUploadRequest": {
-                "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+                "recipes": [recipe],
                 "owner": person_urn,
                 "serviceRelationships": [
                     {
@@ -82,25 +85,33 @@ async def register_upload(access_token: str, person_urn: str):
         res.raise_for_status()
         return res.json()
 
-async def upload_image(upload_url: str, image_data: bytes, access_token: str):
+async def upload_asset(upload_url: str, data: bytes, access_token: str):
     """
-    Step 2: Upload the binary image data to the URL from Step 1.
-    Note: For the upload step, LinkedIn generally does not require the Bearer token in headers 
-    if the upload URL is signed, but adding it doesn't hurt. Some docs say just PUT to the URL.
+    Step 2: Upload the binary data (image or video) to the URL from Step 1.
     """
     async with httpx.AsyncClient() as client:
+        # LinkedIn upload URLs often require specific headers or no auth header depending on return
+        # Usually checking the response from registerUpload gives headers.
+        # For simplicity we try basic PUT with binary body.
+        # Large videos might need chunking, but registerUpload for feedshare-video usually gives a single URL for < 200MB.
         res = await client.put(
             upload_url,
-            content=image_data,
-            headers={"Authorization": f"Bearer {access_token}"} 
+            content=data,
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/octet-stream"} 
         )
+        if res.status_code not in [200, 201]:
+             # Retry without auth header (sometimes the URL is a signed S3 URL)
+             res = await client.put(upload_url, content=data, headers={"Content-Type": "application/octet-stream"})
+             
         res.raise_for_status()
         return True
 
-async def post_with_media(access_token: str, person_urn: str, text: str, asset_urn: str):
+async def post_with_media(access_token: str, person_urn: str, text: str, asset_urn: str, media_type: str = "image"):
     """
     Step 3: Create the UGC post referencing the uploaded asset URN.
     """
+    category = "IMAGE" if media_type == "image" else "VIDEO"
+    
     async with httpx.AsyncClient() as client:
         body = {
             "author": person_urn,
@@ -108,13 +119,13 @@ async def post_with_media(access_token: str, person_urn: str, text: str, asset_u
             "specificContent": {
                 "com.linkedin.ugc.ShareContent": {
                     "shareCommentary": {"text": text},
-                    "shareMediaCategory": "IMAGE",
+                    "shareMediaCategory": category,
                     "media": [
                         {
                             "status": "READY",
                             "description": {"text": text},
                             "media": asset_urn,
-                            "title": {"text": text[:200]} # Title is optional but good to have
+                            "title": {"text": text[:200]} 
                         }
                     ]
                 }

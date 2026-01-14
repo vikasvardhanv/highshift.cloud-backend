@@ -25,9 +25,29 @@ class MultiPostRequest(BaseModel):
 async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_current_user)):
     import os
     import datetime
+    import mimetypes
     from app.services.token_service import encrypt_token
     
     results = []
+    
+    # Determine media type if media exists
+    is_video = False
+    media_url = None
+    media_path = None
+    
+    if req.local_media_paths and len(req.local_media_paths) > 0:
+        media_path = req.local_media_paths[0]
+        mime, _ = mimetypes.guess_type(media_path)
+        if mime and "video" in mime:
+            is_video = True
+    elif req.media and len(req.media) > 0:
+        media_url = req.media[0]
+        # Heuristic check for URL extension if no local path
+        ext = media_url.split('?')[0].split('.')[-1].lower()
+        if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
+            is_video = True
+            
+    logger.info(f"Publishing Content: Video={is_video}, Media={media_url or media_path}")
     
     for target in req.accounts:
         # Find the linked account in user model
@@ -74,6 +94,7 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                     if req.local_media_paths:
                         for path in req.local_media_paths:
                             try:
+                                # twitter.upload_media now detects mime type
                                 media_id = await twitter.upload_media(token, file_path=path)
                                 media_ids.append(media_id)
                             except Exception as upload_err:
@@ -82,37 +103,43 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                     res = await twitter.post_tweet(token, req.content, media_ids=media_ids)
                     results.append({"platform": "twitter", "status": "success", "id": res.get("data", {}).get("id")})
                 except Exception as post_error:
-                    # If 401, try refreshing token once more (Simplified for brevity, same logic as above)
-                    # For now just logging error to avoid deep nesting complexity in this edit
                     logger.error(f"Twitter post failed: {post_error}")
                     results.append({"platform": "twitter", "status": "failed", "error": str(post_error)})
                 
             elif target.platform == "instagram":
-                # Instagram requires an image URL
+                # Instagram requires an image/video URL
                 if not req.media:
                     results.append({"platform": "instagram", "status": "failed", "error": "Media URL required for Instagram"})
                     continue
-                # Use the first media URL
+                
                 # NOTE: This URL must be public. Localhost URLs will fail with Instagram API.
-                res = await instagram.publish_image(token, target.accountId, req.media[0], req.content)
+                if is_video:
+                    res = await instagram.publish_video(token, target.accountId, req.media[0], req.content)
+                else:
+                    res = await instagram.publish_image(token, target.accountId, req.media[0], req.content)
+                    
                 results.append({"platform": "instagram", "status": "success", "id": res.get("id")})
                 
             elif target.platform == "facebook":
                 if req.media:
-                    # Use first image for now
-                    res = await facebook.post_photo(token, target.accountId, req.content, req.media[0])
+                    if is_video:
+                         res = await facebook.post_video(token, target.accountId, req.content, req.media[0])
+                    else:
+                         res = await facebook.post_photo(token, target.accountId, req.content, req.media[0])
                 else:
                     res = await facebook.post_to_page(token, target.accountId, req.content)
                 results.append({"platform": "facebook", "status": "success", "id": res.get("id")})
                 
             elif target.platform == "linkedin":
                 if req.media:
+                    media_type_str = "video" if is_video else "image"
+                    
                     # 1. Register Upload
-                    reg_res = await linkedin.register_upload(token, target.accountId)
+                    reg_res = await linkedin.register_upload(token, target.accountId, media_type=media_type_str)
                     upload_url = reg_res['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
                     asset_urn = reg_res['value']['asset']
                     
-                    # 2. Upload Image
+                    # 2. Upload Binary
                     image_data = None
                     # Prefer local path if available to avoid network roundtrip
                     if req.local_media_paths:
@@ -126,10 +153,10 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                             image_data = resp.content
                             
                     if image_data:
-                        await linkedin.upload_image(upload_url, image_data, token)
+                        await linkedin.upload_asset(upload_url, image_data, token)
                         
                         # 3. Create Post
-                        res = await linkedin.post_with_media(token, target.accountId, req.content, asset_urn)
+                        res = await linkedin.post_with_media(token, target.accountId, req.content, asset_urn, media_type=media_type_str)
                     else:
                         # Fallback if binary data loading failed
                         res = await linkedin.post_to_profile(token, target.accountId, req.content)

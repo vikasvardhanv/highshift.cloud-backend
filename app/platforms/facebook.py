@@ -59,6 +59,25 @@ async def post_photo(access_token: str, page_id: str, message: str, image_url: s
         res.raise_for_status()
         return res.json()
 
+async def post_video(access_token: str, page_id: str, message: str, video_url: str):
+    """
+    Post a video to a Facebook Page using a video URL.
+    """
+    async with httpx.AsyncClient() as client:
+        params = {
+            "file_url": video_url,
+            "description": message,
+            "access_token": access_token
+        }
+        
+        # Facebook Video API: https://graph.facebook.com/{page-id}/videos
+        res = await client.post(
+            f"https://graph.facebook.com/v24.0/{page_id}/videos",
+            params=params
+        )
+        res.raise_for_status()
+        return res.json()
+
 async def get_me(access_token: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
