@@ -41,21 +41,24 @@ async def register(user_data: UserRegister):
     import logging
     logger = logging.getLogger("auth")
     logger.setLevel(logging.INFO)
-    logger.info(f"Registering user: {user_data.email}")
+    
+    # Normalize email
+    email = user_data.email.strip().lower()
+    logger.info(f"Registering user: {email}")
 
-    # Check if user exists
-    existing_user = await User.find_one(User.email == user_data.email)
+    # Check if user exists (Case insensitive lookup)
+    existing_user = await User.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
     if existing_user:
-        logger.warning(f"Registration failed: Email {user_data.email} already exists")
+        logger.warning(f"Registration failed: Email {email} already exists")
         raise HTTPException(status_code=400, detail="Email already registered")
     
     # Create new user
-    hashed_pwd = get_password_hash(user_data.password)
-    logger.info(f"Generated hash for {user_data.email}: {hashed_pwd}")
+    hashed_pwd = get_password_hash(user_data.password.strip()) # Strip whitespace from password
+    logger.info(f"Generated hash for {email}: {hashed_pwd}")
     api_key_str = f"hs_{uuid.uuid4().hex}"
     
     new_user = User(
-        email=user_data.email,
+        email=email, # Save normalized email
         passwordHash=hashed_pwd,
         apiKeyHash=hash_key(api_key_str),
         apiKeys=[ApiKey(name="Default Key", keyHash=hash_key(api_key_str))]
@@ -75,18 +78,26 @@ async def register(user_data: UserRegister):
 async def login(user_data: UserLogin):
     import logging
     logger = logging.getLogger("auth")
-    logger.info(f"Login attempt for: {user_data.email}")
+    
+    # Normalize input
+    email = user_data.email.strip()
+    # Note: We DON'T lower() here for the search query immediately because we want to support 
+    # finding the user even if stored with mixed case, but we use regex 'i' to match any case.
+    
+    logger.info(f"Login attempt for: {email}")
 
-    user = await User.find_one(User.email == user_data.email)
+    # Case-insensitive search
+    user = await User.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
     if not user:
-        logger.warning(f"Login failed: User {user_data.email} not found")
+        logger.warning(f"Login failed: User {email} not found")
         raise HTTPException(status_code=401, detail="Invalid email or password")
         
     if not user.password_hash:
-        logger.warning(f"Login failed: User {user_data.email} has no password hash (likely OAuth only)")
+        logger.warning(f"Login failed: User {email} has no password hash (likely OAuth only)")
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    is_valid = verify_password(user_data.password, user.password_hash)
+    # Verify password (strip input)
+    is_valid = verify_password(user_data.password.strip(), user.password_hash)
     if not is_valid:
         logger.warning(f"Login failed: Invalid password for {user_data.email}")
         logger.info(f"User ID: {user.id}")
@@ -627,7 +638,11 @@ async def forgot_password(req: ForgotPasswordRequest):
     """
     Initiate password reset: Generate token and send email.
     """
-    user = await User.find_one(User.email == req.email)
+    email = req.email.strip()
+    
+    # 1. Find User by Email (Case Insensitive)
+    user = await User.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
+    
     if not user:
         # Avoid user enumeration: pretend stats is success
         # In a real app, maybe delay response slightly to mitigate timing attacks
