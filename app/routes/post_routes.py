@@ -116,6 +116,11 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                             resp = await client.get(url)
                             resp.raise_for_status()
                             
+                            content_type = resp.headers.get("content-type", "")
+                            if "text/html" in content_type:
+                                logger.warning(f"Skipping URL {url} - identified as HTML (likely a webpage link, not media file)")
+                                continue
+                                
                             with open(path, "wb") as f:
                                 f.write(resp.content)
                             
