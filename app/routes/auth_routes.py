@@ -591,3 +591,68 @@ async def connect_oauth_callback(
     """Alias for /auth/{platform}/callback - forwards to main oauth_callback."""
     return await oauth_callback(platform, code, state, error, denied)
 
+
+# ============ Password Reset Endpoints ============
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+@router.post("/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest):
+    """
+    Initiate password reset: Generate token and send email.
+    """
+    user = await User.find_one(User.email == req.email)
+    if not user:
+        # Avoid user enumeration: pretend stats is success
+        # In a real app, maybe delay response slightly to mitigate timing attacks
+        return {"status": "success", "message": "If account exists, reset email sent."}
+    
+    # Generate Token (valid for 30 mins)
+    reset_token = str(uuid.uuid4())
+    user.reset_token = reset_token
+    user.reset_token_expiry = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+    await user.save()
+    
+    # Construct Link
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    reset_link = f"{frontend_url}/reset-password?token={reset_token}"
+    
+    # Send Email
+    from app.services.email_service import send_password_reset_email
+    
+    # Attempt to send email
+    success = send_password_reset_email(user.email, reset_link)
+    
+    if not success:
+         logger.error(f"Failed to send reset email to {user.email}")
+         # Optionally expose error if internal testing, but safer to hide
+    
+    return {"status": "success", "message": "If account exists, reset email sent."}
+
+@router.post("/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    """
+    Reset password using valid token.
+    """
+    user = await User.find_one(User.reset_token == req.token)
+    
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid token")
+        
+    if not user.reset_token_expiry or user.reset_token_expiry < datetime.datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Token expired")
+        
+    # Update Password
+    hashed_pwd = get_password_hash(req.new_password)
+    user.password_hash = hashed_pwd
+    user.reset_token = None
+    user.reset_token_expiry = None
+    await user.save()
+    
+    return {"status": "success", "message": "Password updated successfully"}
+

@@ -51,6 +51,10 @@ class User(Document):
     email: Optional[str] = Field(None, unique=True)
     password_hash: Optional[str] = Field(None, alias="passwordHash")
     google_id: Optional[str] = Field(None, alias="googleId")
+    
+    # Password Reset
+    reset_token: Optional[str] = Field(None, alias="resetToken")
+    reset_token_expiry: Optional[datetime] = Field(None, alias="resetTokenExpiry")
 
     class Settings:
         name = "users"
