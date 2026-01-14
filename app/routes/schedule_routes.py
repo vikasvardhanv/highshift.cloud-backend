@@ -16,7 +16,7 @@ router = APIRouter(prefix="/schedule", tags=["Schedule"], dependencies=[Depends(
 async def get_schedule(
     user: User = Depends(get_current_user)
 ):
-    posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("-scheduled_time").to_list()
+    posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("-scheduled_for").to_list()
     return {"posts": posts}
 
 @router.post("")
@@ -40,7 +40,6 @@ async def create_schedule(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format")
 
-    # Validating accounts structure roughly or letting Pydantic handle it via AccountTarget
     from app.models.scheduled_post import AccountTarget
     
     post = ScheduledPost(
@@ -60,8 +59,6 @@ async def delete_scheduled_post(
     post_id: str,
     user: User = Depends(get_current_user)
 ):
-    # In Beanie we need Pydantic ObjectId usually, but find_one works with string if defined carefully
-    # Assuming str works or converting if needed. Beanie handles str -> ObjectId often automatically.
     from bson import ObjectId
     try:
         p_id = ObjectId(post_id)
@@ -84,17 +81,17 @@ async def get_schedule_calendar(
     """
     Returns scheduled posts grouped by date for calendar display.
     """
-    posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("scheduled_time").to_list()
+    posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("scheduled_for").to_list()
     
     # Group by date (YYYY-MM-DD)
     calendar_data = defaultdict(list)
     for post in posts:
-        date_key = post.scheduled_time.strftime("%Y-%m-%d")
+        date_key = post.scheduled_for.strftime("%Y-%m-%d")
         calendar_data[date_key].append({
             "id": str(post.id),
             "content": post.content[:50] + "..." if len(post.content) > 50 else post.content,
-            "time": post.scheduled_time.strftime("%H:%M"),
-            "platforms": [acc.get("platform") for acc in post.target_accounts] if post.target_accounts else [],
+            "time": post.scheduled_for.strftime("%H:%M"),
+            "platforms": [acc.platform for acc in post.accounts] if post.accounts else [],
             "status": post.status
         })
     
