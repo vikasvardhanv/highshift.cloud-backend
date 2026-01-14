@@ -406,7 +406,7 @@ async def get_media_library(
     from app.models.media import Media
     
     docs = await Media.find(
-        Media.user_id == str(user.id)
+        {"userId": str(user.id)}
     ).sort(-Media.created_at).limit(limit).skip(skip).to_list()
     
     return {
