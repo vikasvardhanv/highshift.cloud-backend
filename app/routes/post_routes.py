@@ -194,9 +194,15 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                                 logger.info(f"Twitter: Successfully uploaded media, ID: {media_id}")
                             except Exception as upload_err:
                                 logger.error(f"Failed to upload media to Twitter: {upload_err}", exc_info=True)
+                                # Abort immediately if any media upload fails
+                                raise upload_err
                     else:
                         logger.warning("Twitter: No local_media_paths provided for media upload")
                     
+                    # Safety check: if we expected media but listed none (and didn't raise earlier), abort
+                    if req.local_media_paths and not media_ids:
+                        raise ValueError("Media upload failed: No media IDs returned despite local paths provided")
+
                     logger.info(f"Twitter: Creating tweet with {len(media_ids)} media_ids: {media_ids}")
                     res = await twitter.post_tweet(token, req.content, media_ids=media_ids)
                     logger.info(f"Twitter: Tweet created successfully: {res}")
@@ -473,3 +479,28 @@ async def get_media_library(
             for m in docs
         ]
     }
+
+@router.delete("/media/{media_id}")
+async def delete_media(
+    media_id: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Delete a media item from the library.
+    """
+    from app.models.media import Media
+    from beanie import PydanticObjectId
+    
+    try:
+        obj_id = PydanticObjectId(media_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid media ID format")
+    
+    media = await Media.find_one({"_id": obj_id, "userId": str(user.id)})
+    if not media:
+        raise HTTPException(status_code=404, detail="Media not found")
+        
+    await media.delete()
+    logger.info(f"Deleted media {media_id} for user {user.id}")
+    
+    return {"status": "success", "id": media_id}

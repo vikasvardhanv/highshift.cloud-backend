@@ -165,7 +165,7 @@ async def upload_media(
             "media_id": media_id
         }
         res = requests.post(url, data=finalize_data, auth=auth)
-        if res.status_code not in [200, 202]:
+        if res.status_code not in [200, 201, 202]:
             logger.error(f"Twitter FINALIZE failed: {res.status_code} - {res.text}")
             res.raise_for_status()
         logger.info(f"Twitter FINALIZE success")
