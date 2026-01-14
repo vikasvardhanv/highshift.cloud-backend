@@ -141,8 +141,15 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                     if req.local_media_paths:
                         for path in req.local_media_paths:
                             try:
-                                # twitter.upload_media now detects mime type
-                                media_id = await twitter.upload_media(token, file_path=path)
+                                # twitter.upload_media requires OAuth 1.0a credentials
+                                media_id = await twitter.upload_media(
+                                    token,
+                                    file_path=path,
+                                    api_key=os.getenv("TWITTER_API_KEY"),
+                                    api_secret=os.getenv("TWITTER_API_SECRET"),
+                                    access_token_oauth1=os.getenv("TWITTER_ACCESS_TOKEN"),
+                                    access_token_secret=os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
+                                )
                                 media_ids.append(media_id)
                             except Exception as upload_err:
                                 logger.error(f"Failed to upload media to Twitter: {upload_err}")
