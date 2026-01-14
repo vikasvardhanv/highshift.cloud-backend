@@ -66,6 +66,7 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
             async with httpx.AsyncClient() as client:
                 for url in req.media:
                     try:
+                        logger.info(f"Downloading media from: {url}")
                         # Guess extension
                         ext = url.split('?')[0].split('.')[-1].lower()
                         if len(ext) > 4 or not ext: 
@@ -87,13 +88,13 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                             
                         req.local_media_paths.append(path)
                         temp_files_to_cleanup.append(path)
-                        logger.info(f"Downloaded {url} to {path}")
+                        logger.info(f"Successfully downloaded {url} to {path} ({len(resp.content)} bytes)")
                         
                     except Exception as dl_err:
-                        logger.error(f"Failed to download media from {url}: {dl_err}")
+                        logger.error(f"Failed to download media from {url}: {dl_err}", exc_info=True)
                         # Continue, maybe other files work or text-only post proceeds
         except Exception as e:
-            logger.error(f"Error in media download block: {e}")
+            logger.error(f"Error in media download block: {e}", exc_info=True)
 
     for target in req.accounts:
 
@@ -139,8 +140,10 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                     # Upload media if exists
                     media_ids = []
                     if req.local_media_paths:
+                        logger.info(f"Twitter: Uploading {len(req.local_media_paths)} media files")
                         for path in req.local_media_paths:
                             try:
+                                logger.info(f"Twitter: Uploading file: {path}")
                                 # twitter.upload_media requires OAuth 1.0a credentials
                                 media_id = await twitter.upload_media(
                                     token,
@@ -151,10 +154,15 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
                                     access_token_secret=os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
                                 )
                                 media_ids.append(media_id)
+                                logger.info(f"Twitter: Successfully uploaded media, ID: {media_id}")
                             except Exception as upload_err:
-                                logger.error(f"Failed to upload media to Twitter: {upload_err}")
+                                logger.error(f"Failed to upload media to Twitter: {upload_err}", exc_info=True)
+                    else:
+                        logger.warning("Twitter: No local_media_paths provided for media upload")
                     
+                    logger.info(f"Twitter: Creating tweet with {len(media_ids)} media_ids: {media_ids}")
                     res = await twitter.post_tweet(token, req.content, media_ids=media_ids)
+                    logger.info(f"Twitter: Tweet created successfully: {res}")
                     results.append({"platform": "twitter", "status": "success", "id": res.get("data", {}).get("id")})
                 except Exception as post_error:
                     logger.error(f"Twitter post failed: {post_error}")
