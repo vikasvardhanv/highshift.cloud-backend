@@ -9,7 +9,7 @@ router = APIRouter(prefix="/ai", tags=["AI"])
 
 class GenerateRequest(BaseModel):
     topic: str
-    platform: str
+    platform: str = "all"
     tone: Optional[str] = None
 
 @router.post("/generate")
