@@ -48,8 +48,55 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
             is_video = True
             
     logger.info(f"Publishing Content: Video={is_video}, Media={media_url or media_path}")
+
+    # =========================================================================
+    # MEDIA HANDLING: Download URLs to temp files if needed (e.g. for Twitter)
+    # =========================================================================
+    temp_files_to_cleanup = []
     
-    for target in req.accounts:
+    # If we have only URLs but need local files (Twitter requires binary upload),
+    # download them to temporary paths.
+    if not req.local_media_paths and req.media:
+        import tempfile
+        import os
+        
+        logger.info(f"No local paths provided. Downloading {len(req.media)} media files from URLs...")
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                for url in req.media:
+                    try:
+                        # Guess extension
+                        ext = url.split('?')[0].split('.')[-1].lower()
+                        if len(ext) > 4 or not ext: 
+                            ext = "tmp"
+                            
+                        # Create temp file
+                        fd, path = tempfile.mkstemp(suffix=f".{ext}")
+                        os.close(fd)
+                        
+                        # Download
+                        resp = await client.get(url)
+                        resp.raise_for_status()
+                        
+                        with open(path, "wb") as f:
+                            f.write(resp.content)
+                            
+                        if not req.local_media_paths:
+                            req.local_media_paths = []
+                            
+                        req.local_media_paths.append(path)
+                        temp_files_to_cleanup.append(path)
+                        logger.info(f"Downloaded {url} to {path}")
+                        
+                    except Exception as dl_err:
+                        logger.error(f"Failed to download media from {url}: {dl_err}")
+                        # Continue, maybe other files work or text-only post proceeds
+        except Exception as e:
+            logger.error(f"Error in media download block: {e}")
+
+    try:
+
         # Find the linked account in user model
         account = next((a for a in user.linked_accounts if a.platform == target.platform and a.account_id == target.accountId), None)
         
@@ -171,6 +218,18 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
             logger.error(f"Failed to post to {target.platform}: {e}")
             results.append({"platform": target.platform, "status": "failed", "error": str(e)})
             
+    finally:
+        # Cleanup temporary files
+        if 'temp_files_to_cleanup' in locals():
+            import os
+            for path in temp_files_to_cleanup:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                        logger.info(f"Cleaned up temp file: {path}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Failed to cleanup temp file {path}: {cleanup_err}")
+
     return {"results": results}
 
 
