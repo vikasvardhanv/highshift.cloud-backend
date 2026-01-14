@@ -95,7 +95,7 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
         except Exception as e:
             logger.error(f"Error in media download block: {e}")
 
-    try:
+    for target in req.accounts:
 
         # Find the linked account in user model
         account = next((a for a in user.linked_accounts if a.platform == target.platform and a.account_id == target.accountId), None)
@@ -218,17 +218,16 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
             logger.error(f"Failed to post to {target.platform}: {e}")
             results.append({"platform": target.platform, "status": "failed", "error": str(e)})
             
-    finally:
-        # Cleanup temporary files
-        if 'temp_files_to_cleanup' in locals():
-            import os
-            for path in temp_files_to_cleanup:
-                try:
-                    if os.path.exists(path):
-                        os.remove(path)
-                        logger.info(f"Cleaned up temp file: {path}")
-                except Exception as cleanup_err:
-                    logger.warning(f"Failed to cleanup temp file {path}: {cleanup_err}")
+    # Cleanup temporary files
+    if 'temp_files_to_cleanup' in locals():
+        import os
+        for path in temp_files_to_cleanup:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    logger.info(f"Cleaned up temp file: {path}")
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to cleanup temp file {path}: {cleanup_err}")
 
     return {"results": results}
 
