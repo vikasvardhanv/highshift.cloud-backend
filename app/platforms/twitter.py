@@ -199,6 +199,8 @@ async def post_tweet(access_token: str, text: str, media_ids: list = None):
         payload = {"text": text}
         if media_ids:
             payload["media"] = {"media_ids": media_ids}
+        
+        logger.info(f"Twitter API request payload: {payload}")
             
         res = await client.post(
             "https://api.twitter.com/2/tweets",
@@ -208,6 +210,10 @@ async def post_tweet(access_token: str, text: str, media_ids: list = None):
             },
             json=payload
         )
+        
+        if res.status_code != 201:
+            logger.error(f"Twitter API error: {res.status_code} - {res.text}")
+        
         res.raise_for_status()
         return res.json()
 
