@@ -59,42 +59,79 @@ async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_cu
     if not req.local_media_paths and req.media:
         import tempfile
         import os
+        import base64
+        import re
         
-        logger.info(f"No local paths provided. Downloading {len(req.media)} media files from URLs...")
+        logger.info(f"No local paths provided. Processing {len(req.media)} media files from URLs...")
         
         try:
             async with httpx.AsyncClient() as client:
                 for url in req.media:
                     try:
-                        logger.info(f"Downloading media from: {url}")
-                        # Guess extension
-                        ext = url.split('?')[0].split('.')[-1].lower()
-                        if len(ext) > 4 or not ext: 
-                            ext = "tmp"
-                            
-                        # Create temp file
-                        fd, path = tempfile.mkstemp(suffix=f".{ext}")
-                        os.close(fd)
+                        # Check if it's a data URL (base64 encoded)
+                        data_url_match = re.match(r'^data:([^;]+);base64,(.+)$', url)
                         
-                        # Download
-                        resp = await client.get(url)
-                        resp.raise_for_status()
-                        
-                        with open(path, "wb") as f:
-                            f.write(resp.content)
+                        if data_url_match:
+                            # It's a data URL - decode base64
+                            mime_type = data_url_match.group(1)
+                            base64_data = data_url_match.group(2)
                             
+                            logger.info(f"Processing data URL with MIME type: {mime_type}")
+                            
+                            # Determine extension from MIME type
+                            ext_map = {
+                                'image/jpeg': 'jpg',
+                                'image/jpg': 'jpg',
+                                'image/png': 'png',
+                                'image/gif': 'gif',
+                                'video/mp4': 'mp4',
+                                'video/quicktime': 'mov'
+                            }
+                            ext = ext_map.get(mime_type, 'tmp')
+                            
+                            # Create temp file
+                            fd, path = tempfile.mkstemp(suffix=f".{ext}")
+                            os.close(fd)
+                            
+                            # Decode and write base64 data
+                            media_bytes = base64.b64decode(base64_data)
+                            with open(path, "wb") as f:
+                                f.write(media_bytes)
+                            
+                            logger.info(f"Successfully decoded data URL to {path} ({len(media_bytes)} bytes)")
+                        else:
+                            # It's a regular URL - download via HTTP
+                            logger.info(f"Downloading media from: {url[:100]}...")
+                            
+                            # Guess extension
+                            ext = url.split('?')[0].split('.')[-1].lower()
+                            if len(ext) > 4 or not ext: 
+                                ext = "tmp"
+                                
+                            # Create temp file
+                            fd, path = tempfile.mkstemp(suffix=f".{ext}")
+                            os.close(fd)
+                            
+                            # Download
+                            resp = await client.get(url)
+                            resp.raise_for_status()
+                            
+                            with open(path, "wb") as f:
+                                f.write(resp.content)
+                            
+                            logger.info(f"Successfully downloaded URL to {path} ({len(resp.content)} bytes)")
+                        
                         if not req.local_media_paths:
                             req.local_media_paths = []
                             
                         req.local_media_paths.append(path)
                         temp_files_to_cleanup.append(path)
-                        logger.info(f"Successfully downloaded {url} to {path} ({len(resp.content)} bytes)")
                         
                     except Exception as dl_err:
-                        logger.error(f"Failed to download media from {url}: {dl_err}", exc_info=True)
+                        logger.error(f"Failed to process media: {dl_err}", exc_info=True)
                         # Continue, maybe other files work or text-only post proceeds
         except Exception as e:
-            logger.error(f"Error in media download block: {e}", exc_info=True)
+            logger.error(f"Error in media processing block: {e}", exc_info=True)
 
     for target in req.accounts:
 
