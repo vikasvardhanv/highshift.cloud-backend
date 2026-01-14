@@ -1,4 +1,4 @@
-import pandas as pd
+# import pandas as pd (REMOVED)
 from datetime import datetime, timedelta
 from typing import List
 from app.models.analytics import AnalyticsSnapshot
@@ -6,7 +6,7 @@ from app.utils.logger import logger
 
 async def get_account_analytics(user_id: str, account_id: str, days: int = 30):
     """
-    Calculate follower growth and engagement using Pandas.
+    Calculate follower growth and engagement using standard Python (No Pandas).
     """
     try:
         start_date = datetime.utcnow() - timedelta(days=days)
@@ -21,17 +21,29 @@ async def get_account_analytics(user_id: str, account_id: str, days: int = 30):
         if not snapshots:
             return {"message": "No data found for this period", "data": []}
 
-        # Convert to Pandas DataFrame
-        df = pd.DataFrame([s.dict() for s in snapshots])
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values('timestamp')
+        # Convert to list of dicts & Sort by timestamp
+        data_points = [s.dict() for s in snapshots]
+        data_points.sort(key=lambda x: x['timestamp'])
 
         # Calculate Growth
-        total_growth = df['followers'].iloc[-1] - df['followers'].iloc[0]
-        avg_engagement = df['engagement'].mean()
+        first = data_points[0]
+        last = data_points[-1]
+        total_growth = last.get('followers', 0) - first.get('followers', 0)
+        
+        # Calculate Average Engagement
+        engagements = [d.get('engagement', 0) for d in data_points]
+        avg_engagement = sum(engagements) / len(engagements) if engagements else 0
 
         # Format for frontend
-        chart_data = df[['timestamp', 'followers', 'engagement']].to_dict(orient='records')
+        # Keep only necessary fields if needed, or pass full dict
+        chart_data = [
+            {
+                "timestamp": d['timestamp'],
+                "followers": d.get('followers', 0),
+                "engagement": d.get('engagement', 0)
+            }
+            for d in data_points
+        ]
 
         return {
             "accountId": account_id,
