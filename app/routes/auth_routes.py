@@ -89,6 +89,7 @@ async def login(user_data: UserLogin):
     is_valid = verify_password(user_data.password, user.password_hash)
     if not is_valid:
         logger.warning(f"Login failed: Invalid password for {user_data.email}")
+        logger.info(f"User ID: {user.id}")
         logger.info(f"Stored Hash: {user.password_hash}")
         # logger.info(f"Input Pwd: {user_data.password}") # SECURITY RISK: Don't log passwords
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -672,7 +673,7 @@ async def reset_password(req: ResetPasswordRequest):
     logger = logging.getLogger("auth")
     
     hashed_pwd = get_password_hash(req.new_password)
-    logger.info(f"Resetting password for {user.email}. New Hash: {hashed_pwd}")
+    logger.info(f"Resetting password for {user.email}. User ID: {user.id}. New Hash: {hashed_pwd}")
     
     user.password_hash = hashed_pwd
     user.reset_token = None
