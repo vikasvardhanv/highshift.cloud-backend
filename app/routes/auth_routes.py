@@ -343,7 +343,10 @@ async def connect_platform(
     if platform == "linkedin":
         client_id = os.getenv("LINKEDIN_CLIENT_ID")
         redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
-        scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social,rw_organization_admin,w_organization_social").split(",")
+        # Default to minimal scopes if full ones fail, but try full ones first
+        default_scopes = "openid,profile,w_member_social"
+        full_scopes = "openid,profile,w_member_social,rw_organization_admin,w_organization_social"
+        scopes = os.getenv("LINKEDIN_SCOPES", full_scopes).split(",")
         url = await linkedin.get_auth_url(client_id, redirect_uri, state, scopes)
         return {"authUrl": url}
 
