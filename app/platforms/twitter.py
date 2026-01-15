@@ -176,14 +176,25 @@ async def upload_media(
             if processing_info:
                 import time
                 state = processing_info.get("state")
+                attempts = 0
+                max_attempts = 60 # Wait up to ~60-120 seconds
+                
                 while state in ["pending", "in_progress"]:
+                    if attempts > max_attempts:
+                         logger.error("Twitter Video Processing Timed Out")
+                         raise Exception("Twitter Video Processing Timed Out")
+                         
                     wait_secs = processing_info.get("check_after_secs", 1)
                     time.sleep(wait_secs)
+                    
                     status_params = {"command": "STATUS", "media_id": media_id}
                     check_res = requests.get(url, params=status_params, auth=auth)
                     processing_info = check_res.json().get("processing_info", {})
                     state = processing_info.get("state")
                     logger.info(f"Twitter video processing: {state}")
+                    
+                    attempts += 1
+                    
                     if state == "failed":
                         error = processing_info.get("error", {})
                         logger.error(f"Twitter Video Processing Failed: {error}")

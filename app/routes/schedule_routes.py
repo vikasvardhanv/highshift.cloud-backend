@@ -100,20 +100,20 @@ async def get_schedule_calendar(
     posts = await ScheduledPost.find({"userId.$id": user.id}).sort("scheduledFor").to_list()
     print(f"DEBUG: Found {len(posts)} posts for calendar")
     
-    # Group by date (YYYY-MM-DD)
-    calendar_data = defaultdict(list)
+    # Return flat list, let frontend handle grouping by local timezone
+    calendar_events = []
     for post in posts:
         try:
-            date_key = post.scheduled_for.strftime("%Y-%m-%d")
-            calendar_data[date_key].append({
+           calendar_events.append({
                 "id": str(post.id),
                 "content": post.content[:50] + "..." if len(post.content) > 50 else post.content,
-                "time": post.scheduled_for.strftime("%H:%M"),
+                "time": post.scheduled_for.isoformat(), # Return full ISO (UTC)
                 "platforms": [acc.platform for acc in post.accounts] if post.accounts else [],
-                "status": post.status
+                "status": post.status,
+                "media": post.media # Include media to debug empty media issues
             })
         except Exception as e:
             print(f"DEBUG: Error processing post {post.id} for calendar: {e}")
     
-    return {"calendar": dict(calendar_data)}
+    return {"calendar": calendar_events} # Changed from dict to list wrapper
 
