@@ -98,7 +98,7 @@ async def get_accounts(access_token: str):
         res = await client.get(
             "https://graph.facebook.com/v19.0/me/accounts",
             params={
-                "fields": "id,name,access_token,picture,instagram_business_account{id,username,profile_picture_url}",
+                "fields": "id,name,access_token,picture", # Simplified to debug "No Pages" issue
                 "access_token": access_token
             }
         )
