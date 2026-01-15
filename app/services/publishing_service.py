@@ -11,7 +11,7 @@ from typing import List, Optional, Dict, Any
 from app.models.user import User
 from app.models.activity import ActivityLog
 from app.services.token_service import decrypt_token, encrypt_token
-from app.platforms import instagram, twitter, facebook, linkedin
+from app.platforms import instagram, twitter, facebook, linkedin, tiktok
 
 logger = logging.getLogger("publishing")
 
@@ -241,6 +241,20 @@ async def publish_content(
                 
                 results.append({"platform": "linkedin", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to LinkedIn", platform="LinkedIn", type="success").insert()
+            
+            # --- TIKTOK ---
+            elif platform == "tiktok":
+                if not is_video or not media_urls:
+                    results.append({"platform": "tiktok", "status": "failed", "error": "TikTok requires a video file."})
+                    continue
+                    
+                # TikTok Post
+                # We need the direct URL for the module to read (since our module reads URL using httpx)
+                # Ensure media_urls[0] is accessible or logic in tiktok.py handles it
+                res = await tiktok.post_video(token, account_id, media_urls[0], content)
+                
+                results.append({"platform": "tiktok", "status": "success", "id": res.get("id")})
+                await ActivityLog(userId=str(user.id), title="Posted to TikTok", platform="TikTok", type="success").insert()
 
             else:
                 results.append({"platform": platform, "status": "failed", "error": "Not implemented"})

@@ -143,3 +143,56 @@ async def post_with_media(access_token: str, person_urn: str, text: str, asset_u
         )
         res.raise_for_status()
         return res.json()
+
+async def get_me(access_token: str):
+    """
+    Fetch the LinkedIn user profile information.
+    Returns URN (id), name, and profile picture if available.
+    """
+    async with httpx.AsyncClient() as client:
+        # Fetch basic profile (URN and name)
+        res = await client.get(
+            "https://api.linkedin.com/v2/me",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "X-Restli-Protocol-Version": "2.0.0"
+            }
+        )
+        res.raise_for_status()
+        profile_data = res.json()
+        
+        # Profile URN is in 'id', e.g., 'urn:li:person:ABC123XYZ'
+        member_id = profile_data.get('id')
+        urn = f"urn:li:person:{member_id}" if member_id and not member_id.startswith('urn:li:person:') else member_id
+        
+        # Combine localized first and last name
+        first_name = profile_data.get('localizedFirstName', '')
+        last_name = profile_data.get('localizedLastName', '')
+        full_name = f"{first_name} {last_name}".strip() or "LinkedIn User"
+        
+        # Try to get profile picture
+        picture = None
+        try:
+            pic_res = await client.get(
+                "https://api.linkedin.com/v2/me?projection=(id,profilePicture(displayImage~:playableStreams))",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "X-Restli-Protocol-Version": "2.0.0"
+                }
+            )
+            if pic_res.status_code == 200:
+                pic_data = pic_res.json()
+                display_image = pic_data.get('profilePicture', {}).get('displayImage~', {})
+                streams = display_image.get('playableStreams', [])
+                if streams:
+                    # Usually the last one is the largest/best quality
+                    picture = streams[-1].get('identifiers', [{}])[0].get('identifier')
+        except Exception as e:
+            logger.warning(f"Could not fetch LinkedIn profile picture: {str(e)}")
+
+        return {
+            "id": urn,
+            "name": full_name,
+            "picture": picture,
+            "raw": profile_data
+        }
