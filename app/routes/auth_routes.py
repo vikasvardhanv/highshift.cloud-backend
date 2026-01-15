@@ -146,7 +146,7 @@ async def get_current_user_info(user: User = Depends(get_current_user)):
 @router.get("/google")
 async def google_login():
     """Start Google OAuth flow for Login (not YouTube channel linking)."""
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
     redirect_uri = os.getenv("GOOGLE_REDIRECT_URL_LOGIN", os.getenv("CORS_ORIGINS", "").split(",")[0] + "/auth/callback") # Default or specific env
     # Note: If separate redirect needed, assume backend handles it. 
     # For now, let's reuse the logic but with a specific state to distinguish login vs linking if needed.
@@ -176,8 +176,8 @@ async def google_login():
 async def google_callback(code: str, state: str):
     import httpx
     
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET")
     backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'http://localhost:3000')}/auth/google/callback"
     
     # DETERMINE FRONTEND URL
@@ -348,9 +348,9 @@ async def connect_platform(
         return {"authUrl": url}
 
     if platform == "youtube":
-        client_id = os.getenv("GOOGLE_CLIENT_ID")
-        redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
-        scopes = os.getenv("GOOGLE_SCOPES", "https://www.googleapis.com/auth/youtube.upload").split(",")
+        client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
+        redirect_uri = os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI")
+        scopes = os.getenv("YOUTUBE_GOOGLE_SCOPES", "https://www.googleapis.com/auth/youtube.upload").split(",")
         url = await youtube.get_auth_url(client_id, redirect_uri, state, scopes)
         return {"authUrl": url}
 
@@ -795,9 +795,9 @@ async def oauth_callback(
         if platform == "youtube":
             # 1. Exchange Code
             token_data = await youtube.exchange_code(
-                client_id=os.getenv("GOOGLE_CLIENT_ID"),
-                client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-                redirect_uri=os.getenv("GOOGLE_REDIRECT_URI"),
+                client_id=os.getenv("YOUTUBE_GOOGLE_CLIENT_ID"),
+                client_secret=os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET"),
+                redirect_uri=os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI"),
                 code=code
             )
             access_token = token_data.get("access_token")
