@@ -17,7 +17,9 @@ async def get_schedule(
     user: User = Depends(get_current_user)
 ):
     print(f"DEBUG: Fetching schedule for user {user.id}")
-    posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("-scheduled_for").to_list()
+    # Fix: User ID is stored as DBRef, so we query userId.$id. 
+    # Also use alias 'scheduledFor' for sorting.
+    posts = await ScheduledPost.find({"userId.$id": user.id}).sort("-scheduledFor").to_list()
     print(f"DEBUG: Found {len(posts)} posts for list view")
     return {"posts": posts}
 
@@ -50,8 +52,10 @@ async def create_schedule(
 
     from app.models.scheduled_post import AccountTarget
     
+    # Store user_id. Beanie handles Link creation automatically if we pass the ID or object?
+    # Ensure user.id is valid.
     post = ScheduledPost(
-        user_id=user.id,
+        user_id=user, # Pass the User object directly to create the Link correctly
         content=content or "",
         accounts=[AccountTarget(**acc) for acc in accounts],
         scheduled_for=dt,
@@ -59,7 +63,7 @@ async def create_schedule(
         status="pending"
     )
     await post.insert()
-    print(f"DEBUG: Scheduled Post Created with ID: {post.id}")
+    print(f"DEBUG: Scheduled Post Created with ID: {post.id} for User {user.id}")
     
     return {"success": True, "post": post}
 
@@ -74,7 +78,8 @@ async def delete_scheduled_post(
     except:
         raise HTTPException(status_code=400, detail="Invalid ID")
 
-    post = await ScheduledPost.find_one(ScheduledPost.id == p_id, ScheduledPost.user_id == user.id)
+    # Fix find_one query as well
+    post = await ScheduledPost.find_one({"_id": p_id, "userId.$id": user.id})
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
         
@@ -91,7 +96,8 @@ async def get_schedule_calendar(
     Returns scheduled posts grouped by date for calendar display.
     """
     print(f"DEBUG: Fetching calendar for user {user.id}")
-    posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("scheduled_for").to_list()
+    # Fix Query and Sort
+    posts = await ScheduledPost.find({"userId.$id": user.id}).sort("scheduledFor").to_list()
     print(f"DEBUG: Found {len(posts)} posts for calendar")
     
     # Group by date (YYYY-MM-DD)
