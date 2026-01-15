@@ -105,3 +105,17 @@ async def get_accounts(access_token: str):
         res.raise_for_status()
         data = res.json()
         return data.get("data", [])
+
+async def get_permissions(access_token: str):
+    """
+    Fetch granted permissions to debug scope issues.
+    """
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            "https://graph.facebook.com/v19.0/me/permissions",
+            params={"access_token": access_token}
+        )
+        if res.status_code != 200:
+            return []
+        data = res.json()
+        return data.get("data", [])

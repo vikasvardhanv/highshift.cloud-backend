@@ -502,9 +502,14 @@ async def oauth_callback(
             if not user_access_token:
                  return RedirectResponse(f"{frontend_url}/auth/callback?error=Failed to get Access Token from Facebook.")
 
+            # DEBUG: Check denied permissions
+            perms = await facebook.get_permissions(user_access_token)
+            print(f"DEBUG: Granted Permissions: {perms}")
+
             # 2. Get Pages (Accounts)
             # We must post to Pages, not User Profile.
             pages = await facebook.get_accounts(user_access_token)
+            print(f"DEBUG: Facebook Pages Response: {pages}")
             
             if not pages:
                 return RedirectResponse(f"{frontend_url}/auth/callback?error=No Facebook Pages found. You must manage a Page to post. Data: {len(pages)}")
