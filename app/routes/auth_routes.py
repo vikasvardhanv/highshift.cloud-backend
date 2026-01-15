@@ -343,7 +343,7 @@ async def connect_platform(
     if platform == "linkedin":
         client_id = os.getenv("LINKEDIN_CLIENT_ID")
         redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
-        scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social").split(",")
+        scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social,rw_organization_admin,w_organization_social").split(",")
         url = await linkedin.get_auth_url(client_id, redirect_uri, state, scopes)
         return {"authUrl": url}
 
@@ -732,20 +732,42 @@ async def oauth_callback(
 
             # 2. Get Profile info
             profile_info = await linkedin.get_me(access_token)
-            account_id = profile_info.get("id")
-            display_name = profile_info.get("name")
-            picture = profile_info.get("picture")
+            organizations = await linkedin.get_organizations(access_token)
+            
+            entities = []
+            if profile_info:
+                entities.append({
+                    "id": profile_info["id"],
+                    "name": profile_info["name"],
+                    "picture": profile_info["picture"],
+                    "raw": profile_info
+                })
+            
+            for org in organizations:
+                entities.append({
+                    "id": org["id"],
+                    "name": org["name"],
+                    "picture": org["picture"],
+                    "raw": org
+                })
+
+            if not entities:
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=Failed to get profile or organizations from LinkedIn.")
 
             # 3. Find/Create User
             user = None
             if user_id_from_state:
                 user = await User.get(user_id_from_state)
             
+            # If not found by state, find by ANY of the linked accounts (though usually we use the first one)
             if not user:
-                user = await User.find_one({
-                    "linkedAccounts.platform": "linkedin",
-                    "linkedAccounts.accountId": account_id
-                })
+                for entity in entities:
+                    user = await User.find_one({
+                        "linkedAccounts.platform": "linkedin",
+                        "linkedAccounts.accountId": entity["id"]
+                    })
+                    if user:
+                        break
 
             api_key_to_return = None
             new_user = False
@@ -757,27 +779,33 @@ async def oauth_callback(
                 )
                 new_user = True
             
-            # 4. Link Account
-            current_account = next((a for a in user.linked_accounts if a.platform == "linkedin" and a.account_id == account_id), None)
-            
-            if not current_account and len(user.linked_accounts) >= user.max_profiles:
-                return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached")
+            # 4. Link Accounts
+            for entity in entities:
+                account_id = entity["id"]
+                display_name = entity["name"]
+                picture = entity["picture"]
+                
+                current_account = next((a for a in user.linked_accounts if a.platform == "linkedin" and a.account_id == account_id), None)
+                
+                if not current_account and len(user.linked_accounts) >= user.max_profiles:
+                    # Skip if limit reached
+                    continue
 
-            linked_account = LinkedAccount(
-                platform="linkedin",
-                accountId=account_id,
-                username=display_name,
-                displayName=display_name,
-                picture=picture,
-                accessTokenEnc=encrypt_token(access_token),
-                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in),
-                rawProfile=profile_info,
-                profileId=profile_id_from_state
-            )
-            
-            # Remove old version if exists, then add new
-            user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "linkedin" and a.account_id == account_id)]
-            user.linked_accounts.append(linked_account)
+                linked_account = LinkedAccount(
+                    platform="linkedin",
+                    accountId=account_id,
+                    username=display_name,
+                    displayName=display_name,
+                    picture=picture,
+                    accessTokenEnc=encrypt_token(access_token),
+                    expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in),
+                    rawProfile=entity["raw"],
+                    profileId=profile_id_from_state
+                )
+                
+                # Remove old version if exists, then add new
+                user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "linkedin" and a.account_id == account_id)]
+                user.linked_accounts.append(linked_account)
             
             if new_user:
                 await user.insert()

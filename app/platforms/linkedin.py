@@ -29,10 +29,10 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
         res.raise_for_status()
         return res.json()
 
-async def post_to_profile(access_token: str, person_urn: str, text: str):
+async def post_to_profile(access_token: str, author_urn: str, text: str):
     async with httpx.AsyncClient() as client:
         body = {
-            "author": person_urn,
+            "author": author_urn,
             "lifecycleState": "PUBLISHED",
             "specificContent": {
                 "com.linkedin.ugc.ShareContent": {
@@ -54,7 +54,7 @@ async def post_to_profile(access_token: str, person_urn: str, text: str):
         res.raise_for_status()
         return res.json()
 
-async def register_upload(access_token: str, person_urn: str, media_type: str = "image"):
+async def register_upload(access_token: str, author_urn: str, media_type: str = "image"):
     """
     Step 1: Register the media upload to get an upload URL.
     media_type: 'image' or 'video'
@@ -65,7 +65,7 @@ async def register_upload(access_token: str, person_urn: str, media_type: str = 
         body = {
             "registerUploadRequest": {
                 "recipes": [recipe],
-                "owner": person_urn,
+                "owner": author_urn,
                 "serviceRelationships": [
                     {
                         "relationshipType": "OWNER",
@@ -107,7 +107,7 @@ async def upload_asset(upload_url: str, data: bytes, access_token: str):
         res.raise_for_status()
         return True
 
-async def post_with_media(access_token: str, person_urn: str, text: str, asset_urn: str, media_type: str = "image"):
+async def post_with_media(access_token: str, author_urn: str, text: str, asset_urn: str, media_type: str = "image"):
     """
     Step 3: Create the UGC post referencing the uploaded asset URN.
     """
@@ -115,7 +115,7 @@ async def post_with_media(access_token: str, person_urn: str, text: str, asset_u
     
     async with httpx.AsyncClient() as client:
         body = {
-            "author": person_urn,
+            "author": author_urn,
             "lifecycleState": "PUBLISHED",
             "specificContent": {
                 "com.linkedin.ugc.ShareContent": {
@@ -214,3 +214,59 @@ async def get_me(access_token: str):
             "picture": picture,
             "raw": profile_data
         }
+
+async def get_organizations(access_token: str):
+    """
+    Fetch LinkedIn Organizations (Company Pages) managed by the user.
+    """
+    async with httpx.AsyncClient() as client:
+        # 1. Get Organizational Entity ACLs (find where the user is an admin)
+        res = await client.get(
+            "https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "X-Restli-Protocol-Version": "2.0.0"
+            }
+        )
+        if res.status_code != 200:
+            logger.error(f"Failed to fetch LinkedIn ACLs: {res.text}")
+            return []
+            
+        acls = res.json().get("elements", [])
+        org_urns = [a["organizationalTarget"] for a in acls if a.get("role") in ["ADMINISTRATOR", "LEAD_ADMIN"]]
+        
+        if not org_urns:
+            return []
+            
+        # 2. Fetch specific details for each organization
+        organizations = []
+        for urn in org_urns:
+            try:
+                # urn:li:organization:123 -> 123
+                org_id = urn.split(":")[-1]
+                org_res = await client.get(
+                    f"https://api.linkedin.com/v2/organizations/{org_id}?projection=(id,localizedName,logoV2(displayImage~:playableStreams))",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "X-Restli-Protocol-Version": "2.0.0"
+                    }
+                )
+                if org_res.status_code == 200:
+                    org_data = org_res.json()
+                    
+                    # Get logo
+                    logo = None
+                    streams = org_data.get("logoV2", {}).get("displayImage~", {}).get("playableStreams", [])
+                    if streams:
+                        logo = streams[-1].get("identifiers", [{}])[0].get("identifier")
+                        
+                    organizations.append({
+                        "id": urn,
+                        "name": org_data.get("localizedName"),
+                        "picture": logo,
+                        "raw": org_data
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to fetch details for organization {urn}: {str(e)}")
+                
+        return organizations
