@@ -792,6 +792,87 @@ async def oauth_callback(
             
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
+        if platform == "youtube":
+            # 1. Exchange Code
+            token_data = await youtube.exchange_code(
+                client_id=os.getenv("GOOGLE_CLIENT_ID"),
+                client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+                redirect_uri=os.getenv("GOOGLE_REDIRECT_URI"),
+                code=code
+            )
+            access_token = token_data.get("access_token")
+            refresh_token = token_data.get("refresh_token")
+            expires_in = token_data.get("expires_in", 3600)
+
+            if not access_token:
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=Failed to get Access Token from Google.")
+
+            # 2. Get Channel Info
+            channel_info = await youtube.get_me(access_token)
+            if not channel_info:
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=No YouTube channel found for this account.")
+            
+            account_id = channel_info.get("id")
+            display_name = channel_info.get("name")
+            picture = channel_info.get("picture")
+
+            # 3. Find/Create User
+            user = None
+            if user_id_from_state:
+                user = await User.get(user_id_from_state)
+            
+            if not user:
+                user = await User.find_one({
+                    "linkedAccounts.platform": "youtube",
+                    "linkedAccounts.accountId": account_id
+                })
+
+            api_key_to_return = None
+            new_user = False
+            if not user:
+                api_key_to_return = f"hs_{uuid.uuid4().hex}"
+                user = User(
+                    apiKeyHash=hash_key(api_key_to_return),
+                    linkedAccounts=[]
+                )
+                new_user = True
+            
+            # 4. Link Account
+            current_account = next((a for a in user.linked_accounts if a.platform == "youtube" and a.account_id == account_id), None)
+            
+            if not current_account and len(user.linked_accounts) >= user.max_profiles:
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached")
+
+            linked_account = LinkedAccount(
+                platform="youtube",
+                accountId=account_id,
+                username=display_name,
+                displayName=display_name,
+                picture=picture,
+                accessTokenEnc=encrypt_token(access_token),
+                refreshTokenEnc=encrypt_token(refresh_token) if refresh_token else None,
+                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in),
+                rawProfile=channel_info,
+                profileId=profile_id_from_state
+            )
+            
+            # Remove old version if exists, then add new
+            user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "youtube" and a.account_id == account_id)]
+            user.linked_accounts.append(linked_account)
+            
+            if new_user:
+                await user.insert()
+            else:
+                await user.save()
+
+            # Redirect
+            jwt_token = create_access_token(data={"sub": str(user.id)})
+            redirect_params = f"platform=youtube&token={jwt_token}"
+            if api_key_to_return:
+                redirect_params += f"&apiKey={api_key_to_return}"
+            
+            return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
+
         if platform == "tiktok":
             # 1. Exchange Code
             token_data = await tiktok.exchange_code(

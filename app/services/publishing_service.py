@@ -11,7 +11,7 @@ from typing import List, Optional, Dict, Any
 from app.models.user import User
 from app.models.activity import ActivityLog
 from app.services.token_service import decrypt_token, encrypt_token
-from app.platforms import instagram, twitter, facebook, linkedin, tiktok
+from app.platforms import instagram, twitter, facebook, linkedin, tiktok, youtube
 
 logger = logging.getLogger("publishing")
 
@@ -255,6 +255,26 @@ async def publish_content(
                 
                 results.append({"platform": "tiktok", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to TikTok", platform="TikTok", type="success").insert()
+
+            # --- YOUTUBE ---
+            elif platform == "youtube":
+                if not is_video or not local_media_paths:
+                    results.append({"platform": "youtube", "status": "failed", "error": "YouTube requires a video file."})
+                    continue
+                
+                # Resumable upload usually needs a local file path
+                title = content[:100] if content else "New Video"
+                description = content
+                
+                res = await youtube.upload_video(
+                    token, 
+                    file_path=local_media_paths[0],
+                    title=title,
+                    description=description
+                )
+                
+                results.append({"platform": "youtube", "status": "success", "id": res.get("id")})
+                await ActivityLog(userId=str(user.id), title="Posted to YouTube", platform="YouTube", type="success").insert()
 
             else:
                 results.append({"platform": platform, "status": "failed", "error": "Not implemented"})
