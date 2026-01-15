@@ -325,7 +325,7 @@ async def connect_platform(
         # Pure Facebook Scopes - NO Instagram scopes here to prevent "Invalid Scope" if product missing
         default_fb_scopes = [
             "public_profile", 
-            "email", 
+            # "email", # Removed to avoid "Invalid Scope" error if not enabled in App
             "pages_show_list", 
             "pages_manage_posts", 
             "pages_read_engagement"
