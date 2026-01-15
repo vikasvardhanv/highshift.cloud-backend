@@ -1,4 +1,5 @@
 import httpx
+import urllib.parse
 from app.utils.logger import logger
 
 async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: list):
@@ -9,7 +10,7 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
         "state": state,
         "scope": " ".join(scopes)
     }
-    encoded_params = "&".join([f"{k}={v}" for k, v in params.items()])
+    encoded_params = urllib.parse.urlencode(params)
     return f"https://www.linkedin.com/oauth/v2/authorization?{encoded_params}"
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):
@@ -147,10 +148,30 @@ async def post_with_media(access_token: str, person_urn: str, text: str, asset_u
 async def get_me(access_token: str):
     """
     Fetch the LinkedIn user profile information.
-    Returns URN (id), name, and profile picture if available.
+    Supports both legacy /v2/me and modern /v2/userinfo (OIDC).
     """
     async with httpx.AsyncClient() as client:
-        # Fetch basic profile (URN and name)
+        # Try modern UserInfo first (OIDC)
+        try:
+            res = await client.get(
+                "https://api.linkedin.com/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            if res.status_code == 200:
+                data = res.json()
+                member_id = data.get("sub")
+                full_name = data.get("name")
+                picture = data.get("picture")
+                return {
+                    "id": f"urn:li:person:{member_id}",
+                    "name": full_name,
+                    "picture": picture,
+                    "raw": data
+                }
+        except Exception as e:
+            logger.warning(f"LinkedIn /userinfo failed, falling back to /me: {str(e)}")
+
+        # Fallback to legacy /me
         res = await client.get(
             "https://api.linkedin.com/v2/me",
             headers={
@@ -161,16 +182,14 @@ async def get_me(access_token: str):
         res.raise_for_status()
         profile_data = res.json()
         
-        # Profile URN is in 'id', e.g., 'urn:li:person:ABC123XYZ'
         member_id = profile_data.get('id')
         urn = f"urn:li:person:{member_id}" if member_id and not member_id.startswith('urn:li:person:') else member_id
         
-        # Combine localized first and last name
         first_name = profile_data.get('localizedFirstName', '')
         last_name = profile_data.get('localizedLastName', '')
         full_name = f"{first_name} {last_name}".strip() or "LinkedIn User"
         
-        # Try to get profile picture
+        # Try to get profile picture via projection
         picture = None
         try:
             pic_res = await client.get(
@@ -185,7 +204,6 @@ async def get_me(access_token: str):
                 display_image = pic_data.get('profilePicture', {}).get('displayImage~', {})
                 streams = display_image.get('playableStreams', [])
                 if streams:
-                    # Usually the last one is the largest/best quality
                     picture = streams[-1].get('identifiers', [{}])[0].get('identifier')
         except Exception as e:
             logger.warning(f"Could not fetch LinkedIn profile picture: {str(e)}")
