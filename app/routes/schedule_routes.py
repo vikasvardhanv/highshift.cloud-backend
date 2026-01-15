@@ -16,7 +16,9 @@ router = APIRouter(prefix="/schedule", tags=["Schedule"], dependencies=[Depends(
 async def get_schedule(
     user: User = Depends(get_current_user)
 ):
+    print(f"DEBUG: Fetching schedule for user {user.id}")
     posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("-scheduled_for").to_list()
+    print(f"DEBUG: Found {len(posts)} posts for list view")
     return {"posts": posts}
 
 @router.post("")
@@ -24,21 +26,27 @@ async def create_schedule(
     payload: dict = Body(...),
     user: User = Depends(get_current_user)
 ):
+    # print(f"DEBUG: Create Schedule Payload: {payload}")
     content = payload.get("content")
     accounts = payload.get("accounts", []) # List of {platform, accountId}
     scheduled_time_str = payload.get("scheduledFor") # ISO string
     media_urls = payload.get("media", [])  # List of URLs (images/videos)
     
     if not content and not media_urls:
+         print("DEBUG: Missing content/media")
          raise HTTPException(status_code=400, detail="Content or Media is required")
          
     if not accounts or not scheduled_time_str:
+        print("DEBUG: Missing accounts or time")
         raise HTTPException(status_code=400, detail="Missing accounts or scheduled time")
 
     try:
+        # Handle potential Z suffix or offset
         dt = datetime.datetime.fromisoformat(scheduled_time_str.replace("Z", "+00:00"))
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format")
+        print(f"DEBUG: Parsed datetime: {dt}")
+    except ValueError as e:
+        print(f"DEBUG: Date parse error: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
 
     from app.models.scheduled_post import AccountTarget
     
@@ -51,6 +59,7 @@ async def create_schedule(
         status="pending"
     )
     await post.insert()
+    print(f"DEBUG: Scheduled Post Created with ID: {post.id}")
     
     return {"success": True, "post": post}
 
@@ -81,19 +90,24 @@ async def get_schedule_calendar(
     """
     Returns scheduled posts grouped by date for calendar display.
     """
+    print(f"DEBUG: Fetching calendar for user {user.id}")
     posts = await ScheduledPost.find(ScheduledPost.user_id == user.id).sort("scheduled_for").to_list()
+    print(f"DEBUG: Found {len(posts)} posts for calendar")
     
     # Group by date (YYYY-MM-DD)
     calendar_data = defaultdict(list)
     for post in posts:
-        date_key = post.scheduled_for.strftime("%Y-%m-%d")
-        calendar_data[date_key].append({
-            "id": str(post.id),
-            "content": post.content[:50] + "..." if len(post.content) > 50 else post.content,
-            "time": post.scheduled_for.strftime("%H:%M"),
-            "platforms": [acc.platform for acc in post.accounts] if post.accounts else [],
-            "status": post.status
-        })
+        try:
+            date_key = post.scheduled_for.strftime("%Y-%m-%d")
+            calendar_data[date_key].append({
+                "id": str(post.id),
+                "content": post.content[:50] + "..." if len(post.content) > 50 else post.content,
+                "time": post.scheduled_for.strftime("%H:%M"),
+                "platforms": [acc.platform for acc in post.accounts] if post.accounts else [],
+                "status": post.status
+            })
+        except Exception as e:
+            print(f"DEBUG: Error processing post {post.id} for calendar: {e}")
     
     return {"calendar": dict(calendar_data)}
 
