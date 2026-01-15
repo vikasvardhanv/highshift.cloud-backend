@@ -89,3 +89,19 @@ async def get_me(access_token: str):
         )
         res.raise_for_status()
         return res.json()
+
+async def get_accounts(access_token: str):
+    """
+    Fetch Facebook Pages and linked Instagram Business Accounts.
+    """
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            "https://graph.facebook.com/v24.0/me/accounts",
+            params={
+                "fields": "id,name,access_token,picture,instagram_business_account{id,username,profile_picture_url}",
+                "access_token": access_token
+            }
+        )
+        res.raise_for_status()
+        data = res.json()
+        return data.get("data", [])

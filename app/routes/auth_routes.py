@@ -472,61 +472,85 @@ async def oauth_callback(
                 redirect_uri=os.getenv("FACEBOOK_REDIRECT_URI"),
                 code=code
             )
-            access_token = token_data.get("access_token")
+            user_access_token = token_data.get("access_token")
             
-            # 2. Get profile
-            profile = await facebook.get_me(access_token)
-            account_id = profile.get("id")
-            username = profile.get("name") # FB doesn't have username like Twitter, use name
-            display_name = profile.get("name")
+            # 2. Get Pages (Accounts)
+            # We must post to Pages, not User Profile.
+            pages = await facebook.get_accounts(user_access_token)
             
-            # 3. Create LinkedAccount
-            linked_account = LinkedAccount(
-                platform="facebook",
-                accountId=account_id,
-                username=username,
-                displayName=display_name,
-                accessTokenEnc=encrypt_token(access_token),
-                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 5184000)), # ~60 days default long-lived
-                rawProfile=profile,
-                profileId=profile_id_from_state
-            )
-            
-            # 4. Find/Create User & Save (Reusable Logic)
-            # ... (Refactoring common logic below would be better, but for now inlining)
-            
-            # Find User
+            if not pages:
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=No Facebook Pages found. You must manage a Page to post.")
+
+            # 3. Find/Create User (Logic: If user logged in, use them. Else find by first page ID match or create)
             user = None
             if user_id_from_state:
                 user = await User.get(user_id_from_state)
             
             if not user:
-                 user = await User.find_one({
+                # Try to find user linked to ANY of these pages
+                page_ids = [p["id"] for p in pages]
+                user = await User.find_one({
                     "linkedAccounts.platform": "facebook",
-                    "linkedAccounts.accountId": account_id
+                    "linkedAccounts.accountId": {"$in": page_ids}
                 })
 
             api_key_to_return = None
+            new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
                 user = User(
                     apiKeyHash=hash_key(api_key_to_return),
-                    linkedAccounts=[linked_account]
+                    linkedAccounts=[] # Will fill below
                 )
+                new_user = True
+            
+            # Check Plan Limits before adding/updating (Simplify: just enforce max profiles count on save)
+            
+            # 4. Link All Pages
+            # We replace existing FB pages or append new ones. 
+            # Strategy: Upkeep user.linked_accounts list.
+            
+            current_fb_accounts = {a.account_id: a for a in user.linked_accounts if a.platform == "facebook"}
+            
+            added_count = 0
+            for page in pages:
+                p_id = page["id"]
+                p_name = page["name"]
+                p_token = page["access_token"] # PAGE Access Token
+                p_pic = page.get("picture", {}).get("data", {}).get("url")
+                
+                # Check limit if adding new
+                if p_id not in current_fb_accounts and len(user.linked_accounts) >= user.max_profiles:
+                    continue # Skip if limit reached
+                
+                linked_account = LinkedAccount(
+                    platform="facebook",
+                    accountId=p_id,
+                    username=p_name, # Pages don't always have usernames, use Name
+                    displayName=p_name,
+                    picture=p_pic,
+                    accessTokenEnc=encrypt_token(p_token), # Store PAGE Token
+                    expiresAt=None, # Page tokens last forever? Or until user password change.
+                    rawProfile=page,
+                    profileId=profile_id_from_state
+                )
+                
+                # Remove old if exists
+                user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "facebook" and a.account_id == p_id)]
+                user.linked_accounts.append(linked_account)
+                added_count += 1
+            
+            if new_user:
                 await user.insert()
             else:
-                existing_account = next((a for a in user.linked_accounts if a.platform == "facebook" and a.account_id == account_id), None)
-                if not existing_account and len(user.linked_accounts) >= user.max_profiles:
-                     return RedirectResponse(
-                            url=f"{frontend_url}/auth/callback?error=Plan Limit Reached"
-                        )
-                user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "facebook" and a.account_id == account_id)]
-                user.linked_accounts.append(linked_account)
                 await user.save()
+
+            if added_count == 0 and len(pages) > 0:
+                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached. Could not add pages.")
 
             # Redirect
             jwt_token = create_access_token(data={"sub": str(user.id)})
-            redirect_params = f"platform=facebook&accountId={account_id}&token={jwt_token}"
+            redirect_params = f"platform=facebook&count={added_count}&token={jwt_token}"
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
@@ -534,66 +558,94 @@ async def oauth_callback(
         if platform == "instagram":
             # 1. Exchange code
             token_data = await instagram.exchange_code(
-                client_id=os.getenv("FACEBOOK_APP_ID"), # Insta uses FB App ID
+                client_id=os.getenv("FACEBOOK_APP_ID"), 
                 client_secret=os.getenv("FACEBOOK_APP_SECRET"),
                 redirect_uri=os.getenv("INSTAGRAM_REDIRECT_URI"),
                 code=code
             )
-            access_token = token_data.get("access_token")
+            user_access_token = token_data.get("access_token")
             
-            # 2. Get profile
-            profile = await instagram.get_me(access_token)
-            account_id = profile.get("id")
-            username = profile.get("username") 
-            display_name = profile.get("name") or username
+            # 2. Get Pages & Linked Instagram Accounts
+            # We rely on facebook.get_accounts because the token allows access to /me/accounts
+            pages = await facebook.get_accounts(user_access_token)
             
-            # 3. Create LinkedAccount
-            linked_account = LinkedAccount(
-                platform="instagram",
-                accountId=account_id,
-                username=username,
-                displayName=display_name,
-                accessTokenEnc=encrypt_token(access_token),
-                # Insta tokens are usually long-lived (60 days) if exchanged properly, 
-                # but standard OAuth code flow gives short-lived (1 hr) unless exchanged again.
-                # Assuming standard flow for now.
-                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 3600)),
-                rawProfile=profile,
-                profileId=profile_id_from_state
-            )
+            if not pages:
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=No Facebook Pages found. Ensure your Instagram Professional account is connected to a Page.")
+
+            # Filter for pages with instagram_business_account
+            ig_accounts = []
+            for p in pages:
+                if "instagram_business_account" in p:
+                    ig_data = p["instagram_business_account"]
+                    ig_data["page_access_token"] = p["access_token"] # We need Page Token to publish to IG
+                    ig_data["page_name"] = p["name"]
+                    ig_accounts.append(ig_data)
             
-            # Find User
+            if not ig_accounts:
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=No Instagram Business Accounts found connected to your Pages.")
+
+            # 3. Find/Create User
             user = None
             if user_id_from_state:
                 user = await User.get(user_id_from_state)
             
             if not user:
-                 user = await User.find_one({
+                ig_ids = [ig["id"] for ig in ig_accounts]
+                user = await User.find_one({
                     "linkedAccounts.platform": "instagram",
-                    "linkedAccounts.accountId": account_id
+                    "linkedAccounts.accountId": {"$in": ig_ids}
                 })
 
             api_key_to_return = None
+            new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
                 user = User(
                     apiKeyHash=hash_key(api_key_to_return),
-                    linkedAccounts=[linked_account]
+                    linkedAccounts=[]
                 )
+                new_user = True
+            
+            # 4. Link All IG Accounts
+            current_ig_accounts = {a.account_id: a for a in user.linked_accounts if a.platform == "instagram"}
+            
+            added_count = 0
+            for ig in ig_accounts:
+                ig_id = ig["id"]
+                ig_username = ig.get("username", "instagram_user")
+                ig_pic = ig.get("profile_picture_url")
+                page_token = ig["page_access_token"]
+                
+                if ig_id not in current_ig_accounts and len(user.linked_accounts) >= user.max_profiles:
+                    continue
+                
+                linked_account = LinkedAccount(
+                    platform="instagram",
+                    accountId=ig_id,
+                    username=ig_username,
+                    displayName=ig_username,
+                    picture=ig_pic,
+                    accessTokenEnc=encrypt_token(page_token), # Store PAGE Token
+                    expiresAt=None, 
+                    rawProfile=ig,
+                    profileId=profile_id_from_state
+                )
+                
+                user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "instagram" and a.account_id == ig_id)]
+                user.linked_accounts.append(linked_account)
+                added_count += 1
+            
+            if new_user:
                 await user.insert()
             else:
-                existing_account = next((a for a in user.linked_accounts if a.platform == "instagram" and a.account_id == account_id), None)
-                if not existing_account and len(user.linked_accounts) >= user.max_profiles:
-                     return RedirectResponse(
-                            url=f"{frontend_url}/auth/callback?error=Plan Limit Reached"
-                        )
-                user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "instagram" and a.account_id == account_id)]
-                user.linked_accounts.append(linked_account)
                 await user.save()
+
+            if added_count == 0:
+                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached or No New Accounts.")
 
             # Redirect
             jwt_token = create_access_token(data={"sub": str(user.id)})
-            redirect_params = f"platform=instagram&accountId={account_id}&token={jwt_token}"
+            redirect_params = f"platform=instagram&count={added_count}&token={jwt_token}"
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
