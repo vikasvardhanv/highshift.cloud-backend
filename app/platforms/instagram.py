@@ -9,12 +9,12 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
         "response_type": "code",
         "scope": ",".join(scopes)
     }
-    return f"https://www.facebook.com/v24.0/dialog/oauth?{'&'.join([f'{k}={v}' for k,v in params.items()])}"
+    return f"https://www.facebook.com/v19.0/dialog/oauth?{'&'.join([f'{k}={v}' for k,v in params.items()])}"
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v24.0/oauth/access_token",
+            "https://graph.facebook.com/v19.0/oauth/access_token",
             params={
                 "client_id": client_id,
                 "client_secret": client_secret,
@@ -30,7 +30,7 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         # 1. Create container
         # Supported params: https://developers.facebook.com/docs/instagram-api/reference/ig-user/media
         create_res = await client.post(
-            f"https://graph.facebook.com/v24.0/{ig_user_id}/media",
+            f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
             params={
                 "image_url": image_url,
                 "caption": caption,
@@ -42,7 +42,7 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
 
         # 2. Publish container
         pub_res = await client.post(
-            f"https://graph.facebook.com/v24.0/{ig_user_id}/media_publish",
+            f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
             params={
                 "creation_id": container_id,
                 "access_token": access_token
@@ -59,7 +59,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
     async with httpx.AsyncClient() as client:
         # 1. Create container with media_type=VIDEO
         create_res = await client.post(
-            f"https://graph.facebook.com/v24.0/{ig_user_id}/media",
+            f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
             params={
                 "media_type": "VIDEO",
                 "video_url": video_url,
@@ -76,7 +76,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
         max_retries = 10
         for _ in range(max_retries):
             status_res = await client.get(
-                f"https://graph.facebook.com/v24.0/{container_id}",
+                f"https://graph.facebook.com/v19.0/{container_id}",
                 params={
                     "fields": "status_code,status",
                     "access_token": access_token
@@ -91,7 +91,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
             
         # 3. Publish container
         pub_res = await client.post(
-            f"https://graph.facebook.com/v24.0/{ig_user_id}/media_publish",
+            f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
             params={
                 "creation_id": container_id,
                 "access_token": access_token
@@ -103,7 +103,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
 async def get_me(access_token: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v24.0/me",
+            "https://graph.facebook.com/v19.0/me",
             params={
                 "fields": "id,name,username,account_type,media_count",
                 "access_token": access_token

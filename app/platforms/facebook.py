@@ -9,12 +9,12 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
         "response_type": "code",
         "scope": ",".join(scopes)
     }
-    return f"https://www.facebook.com/v24.0/dialog/oauth?{'&'.join([f'{k}={v}' for k,v in params.items()])}"
+    return f"https://www.facebook.com/v19.0/dialog/oauth?{'&'.join([f'{k}={v}' for k,v in params.items()])}"
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v24.0/oauth/access_token",
+            "https://graph.facebook.com/v19.0/oauth/access_token",
             params={
                 "client_id": client_id,
                 "client_secret": client_secret,
@@ -35,7 +35,7 @@ async def post_to_page(access_token: str, page_id: str, message: str, link: str 
             params["link"] = link
             
         res = await client.post(
-            f"https://graph.facebook.com/v24.0/{page_id}/feed",
+            f"https://graph.facebook.com/v19.0/{page_id}/feed",
             params=params
         )
         res.raise_for_status()
@@ -53,7 +53,7 @@ async def post_photo(access_token: str, page_id: str, message: str, image_url: s
         }
         
         res = await client.post(
-            f"https://graph.facebook.com/v24.0/{page_id}/photos",
+            f"https://graph.facebook.com/v19.0/{page_id}/photos",
             params=params
         )
         res.raise_for_status()
@@ -72,7 +72,7 @@ async def post_video(access_token: str, page_id: str, message: str, video_url: s
         
         # Facebook Video API: https://graph.facebook.com/{page-id}/videos
         res = await client.post(
-            f"https://graph.facebook.com/v24.0/{page_id}/videos",
+            f"https://graph.facebook.com/v19.0/{page_id}/videos",
             params=params
         )
         res.raise_for_status()
@@ -81,7 +81,7 @@ async def post_video(access_token: str, page_id: str, message: str, video_url: s
 async def get_me(access_token: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v24.0/me",
+            "https://graph.facebook.com/v19.0/me",
             params={
                 "fields": "id,name,email",
                 "access_token": access_token
@@ -96,7 +96,7 @@ async def get_accounts(access_token: str):
     """
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v24.0/me/accounts",
+            "https://graph.facebook.com/v19.0/me/accounts",
             params={
                 "fields": "id,name,access_token,picture,instagram_business_account{id,username,profile_picture_url}",
                 "access_token": access_token
