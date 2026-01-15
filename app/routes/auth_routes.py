@@ -270,10 +270,21 @@ async def connect_platform(
     if platform == "instagram":
         client_id = os.getenv("FACEBOOK_APP_ID")
         redirect_uri = os.getenv("INSTAGRAM_REDIRECT_URI")
-        scopes = os.getenv("INSTAGRAM_SCOPES", "").split(",")
-        url = await instagram.get_auth_url(client_id, redirect_uri, state, scopes)
+        
+        # Instagram Business requires Facebook Page permissions + Instagram permissions
+        default_ig_scopes = [
+            "instagram_basic", 
+            "instagram_content_publish", 
+            "pages_show_list", 
+            "pages_read_engagement"
+        ]
+        
+        env_scopes = os.getenv("INSTAGRAM_SCOPES", "").split(",")
+        final_scopes = list(set(default_ig_scopes + [s for s in env_scopes if s]))
+        
+        url = await instagram.get_auth_url(client_id, redirect_uri, state, final_scopes)
         return {"authUrl": url}
-    
+
     if platform == "twitter":
         client_id = os.getenv("TWITTER_CLIENT_ID")
         redirect_uri = os.getenv("TWITTER_REDIRECT_URI")
@@ -310,13 +321,19 @@ async def connect_platform(
     if platform == "facebook":
         client_id = os.getenv("FACEBOOK_APP_ID")
         redirect_uri = os.getenv("FACEBOOK_REDIRECT_URI")
-        # Ensure 'pages_show_list' is present to find pages!
-        # Also 'instagram_basic' and 'instagram_content_publish' if we want to cross-post to linked IG
-        default_scopes = ["public_profile", "email", "pages_show_list", "pages_manage_posts", "pages_read_engagement", "instagram_basic", "instagram_content_publish"]
+        
+        # Pure Facebook Scopes - NO Instagram scopes here to prevent "Invalid Scope" if product missing
+        default_fb_scopes = [
+            "public_profile", 
+            "email", 
+            "pages_show_list", 
+            "pages_manage_posts", 
+            "pages_read_engagement"
+        ]
         
         env_scopes = os.getenv("FACEBOOK_SCOPES", "").split(",")
-        # Combine unique
-        final_scopes = list(set(default_scopes + [s for s in env_scopes if s]))
+        # Combine unique, filtering out any accidental instagram ones from env if mixed
+        final_scopes = list(set(default_fb_scopes + [s for s in env_scopes if s and "instagram" not in s]))
         
         url = await facebook.get_auth_url(client_id, redirect_uri, state, final_scopes)
         return {"authUrl": url}
@@ -473,16 +490,13 @@ async def oauth_callback(
         # Fallback for other platforms (similar logic needed)
         if platform == "facebook":
             # 1. Exchange code
-            # Define Scopes Explicitly for Debugging - these should match what get_auth_url uses
-            # (Note: get_auth_url is called in the connect endpoint, not here. We just exchange logic here)
-            
+            # Define Scopes Explicitly - these should match what get_auth_url uses
             token_data = await facebook.exchange_code(
                 client_id=os.getenv("FACEBOOK_APP_ID"),
                 client_secret=os.getenv("FACEBOOK_APP_SECRET"),
                 redirect_uri=os.getenv("FACEBOOK_REDIRECT_URI"),
                 code=code
             )
-            # print(f"DEBUG: FB Token Data: {token_data}") 
             user_access_token = token_data.get("access_token")
             
             if not user_access_token:
@@ -491,9 +505,6 @@ async def oauth_callback(
             # 2. Get Pages (Accounts)
             # We must post to Pages, not User Profile.
             pages = await facebook.get_accounts(user_access_token)
-            print(f"DEBUG: FB Pages Found: {len(pages)}")
-            # for p in pages:
-            #     print(f"DEBUG: Page: {p.get('name')} (ID: {p.get('id')})")
             
             if not pages:
                 return RedirectResponse(f"{frontend_url}/auth/callback?error=No Facebook Pages found. You must manage a Page to post. Data: {len(pages)}")
