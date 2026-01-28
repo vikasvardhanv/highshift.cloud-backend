@@ -368,7 +368,10 @@ async def connect_platform(
         scopes = os.getenv("TIKTOK_SCOPES", "user.info.basic,video.publish,video.upload").split(",")
         
         if not client_key or not redirect_uri:
-             raise HTTPException(status_code=500, detail="TikTok Credentials not configured")
+             missing = []
+             if not client_key: missing.append("TIKTOK_CLIENT_KEY")
+             if not redirect_uri: missing.append("TIKTOK_REDIRECT_URI")
+             raise HTTPException(status_code=500, detail=f"TikTok Credentials missing: {', '.join(missing)}")
              
         url = await tiktok.get_auth_url(client_key, redirect_uri, state, scopes)
         logger.info(f"Generated TikTok Auth URL: {url}") # DEBUG: Check parameter names
