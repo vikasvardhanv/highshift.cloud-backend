@@ -349,6 +349,9 @@ async def connect_platform(
         default_scopes = "openid,profile,w_member_social"
         full_scopes = "openid,profile,w_member_social,rw_organization_admin,w_organization_social"
         scopes = os.getenv("LINKEDIN_SCOPES", full_scopes).split(",")
+        
+        logger.info(f"LinkedIn Auth - ClientID: {client_id[:5]}... | RedirectURI: {redirect_uri}")
+        
         url = await linkedin.get_auth_url(client_id, redirect_uri, state, scopes)
         return {"authUrl": url}
 
@@ -368,6 +371,7 @@ async def connect_platform(
              raise HTTPException(status_code=500, detail="TikTok Credentials not configured")
              
         url = await tiktok.get_auth_url(client_key, redirect_uri, state, scopes)
+        logger.info(f"Generated TikTok Auth URL: {url}") # DEBUG: Check parameter names
         return {"authUrl": url}
     
     if platform == "pinterest":
