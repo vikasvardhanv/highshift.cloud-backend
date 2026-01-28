@@ -13,7 +13,7 @@ from app.utils.auth import (
 )
 from app.models.user import User, LinkedAccount, ApiKey
 from app.models.oauth_state import OAuthState
-from app.platforms import instagram, twitter, facebook, linkedin, youtube, tiktok
+from app.platforms import instagram, twitter, facebook, linkedin, youtube, tiktok, pinterest, threads, bluesky, mastodon
 from app.services.token_service import encrypt_token
 
 from pydantic import BaseModel, EmailStr
@@ -370,6 +370,76 @@ async def connect_platform(
         url = await tiktok.get_auth_url(client_key, redirect_uri, state, scopes)
         return {"authUrl": url}
     
+    if platform == "pinterest":
+        client_id = os.getenv("PINTEREST_APP_ID")
+        redirect_uri = os.getenv("PINTEREST_REDIRECT_URI")
+        scopes = os.getenv("PINTEREST_SCOPES", "boards:read,pins:read,pins:write").split(",")
+        if not client_id or not redirect_uri:
+             raise HTTPException(status_code=500, detail="Pinterest Credentials not configured")
+        
+        url = await pinterest.get_auth_url(client_id, redirect_uri, state, scopes)
+        return {"authUrl": url}
+
+    if platform == "threads":
+        client_id = os.getenv("THREADS_APP_ID", os.getenv("FACEBOOK_APP_ID")) # Often same as FB
+        redirect_uri = os.getenv("THREADS_REDIRECT_URI")
+        scopes = os.getenv("THREADS_SCOPES", "threads_basic,threads_content_publish").split(",")
+        if not client_id or not redirect_uri:
+             raise HTTPException(status_code=500, detail="Threads Credentials not configured")
+        
+        url = await threads.get_auth_url(client_id, redirect_uri, state, scopes)
+        return {"authUrl": url}
+
+    if platform == "bluesky":
+        # Bluesky uses App Password usually, but valid to have a 'connect' flow for UI consistency?
+        # Or maybe user provides handle/password directly in frontend form?
+        # For now, we return a special status to tell frontend to show a form.
+        return {"action": "show_form", "fields": ["handle", "app_password"]}
+
+    if platform == "mastodon":
+        # Mastodon requires instance URL first.
+        # User should provide 'instance_url' in query.
+        instance_url = request.query_params.get("instance_url")
+        if not instance_url:
+             return {"action": "show_form", "fields": ["instance_url"]}
+        
+        # 1. Register App dynamically (common pattern for Mastodon clients)
+        # OR use a fixed one if building for a specific community. 
+        # We'll assume dynamic registration or user-provided ENV vars per instance is too complex.
+        # Let's try dynamic registration.
+        redirect_uri = os.getenv("MASTODON_REDIRECT_URI", f"{os.getenv('BACKEND_URL')}/auth/mastodon/callback")
+        
+        try:
+            app_data = await mastodon.get_app_credentials(
+                instance_url, 
+                "HighShift", 
+                redirect_uri, 
+                os.getenv("FRONTEND_URL")
+            )
+            client_id = app_data["client_id"]
+            client_secret = app_data["client_secret"]
+            
+            # We need to store these secrets temporarily associated with the state 
+            # so we can use them in callback!
+            # Using OAuthState model for this
+            oauth_state = OAuthState(
+                state_id=state_id, 
+                extra_data={
+                    "instance_url": instance_url, 
+                    "client_id": client_id, 
+                    "client_secret": client_secret,
+                    "redirect_uri": redirect_uri
+                }
+            )
+            await oauth_state.insert()
+            
+            url = await mastodon.get_auth_url(instance_url, client_id, redirect_uri)
+            return {"authUrl": url}
+            
+        except Exception as e:
+            logger.error(f"Mastodon Registration Failed: {e}")
+            raise HTTPException(status_code=400, detail=f"Could not connect to Mastodon instance: {e}")
+
     raise HTTPException(status_code=400, detail=f"Platform {platform} not supported yet")
 
 # Support both /auth/{platform}/callback AND /connect/{platform}/callback
@@ -978,6 +1048,260 @@ async def oauth_callback(
             # Redirect
             jwt_token = create_access_token(data={"sub": str(user.id)})
             redirect_params = f"platform=tiktok&token={jwt_token}"
+            if api_key_to_return:
+                redirect_params += f"&apiKey={api_key_to_return}"
+            return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
+
+        if platform == "pinterest":
+            # 1. Exchange Code
+            token_data = await pinterest.exchange_code(
+                client_id=os.getenv("PINTEREST_APP_ID"),
+                client_secret=os.getenv("PINTEREST_APP_SECRET"),
+                redirect_uri=os.getenv("PINTEREST_REDIRECT_URI"),
+                code=code
+            )
+            access_token = token_data.get("access_token")
+            expires_in = token_data.get("expires_in", 0)
+            refresh_token = token_data.get("refresh_token")
+            
+            # 2. Get User/Boards
+            user_info = await pinterest.get_user_info(access_token)
+            
+            p_id = user_info.get("username") # Pinterest doesn't always give strict ID in basic profile? Use username or id if avail
+            p_username = user_info.get("username")
+            p_pic = user_info.get("profile_image")
+            
+            # 3. Find/Create User
+            user = None
+            if user_id_from_state:
+                user = await User.get(user_id_from_state)
+            
+            if not user:
+                user = await User.find_one({
+                    "linkedAccounts.platform": "pinterest",
+                    "linkedAccounts.accountId": p_id
+                })
+            
+            api_key_to_return = None
+            new_user = False
+            if not user:
+                api_key_to_return = f"hs_{uuid.uuid4().hex}"
+                user = User(
+                     apiKeyHash=hash_key(api_key_to_return),
+                     linkedAccounts=[]
+                )
+                new_user = True
+
+            # 4. Link Account
+            current_account = next((a for a in user.linked_accounts if a.platform == "pinterest" and a.account_id == p_id), None)
+            
+            if not current_account and len(user.linked_accounts) >= user.max_profiles:
+                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached")
+
+            linked_account = LinkedAccount(
+                platform="pinterest",
+                accountId=p_id,
+                username=p_username,
+                displayName=p_username,
+                picture=p_pic,
+                accessTokenEnc=encrypt_token(access_token),
+                refreshTokenEnc=encrypt_token(refresh_token) if refresh_token else None,
+                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in) if expires_in else None,
+                rawProfile=user_info,
+                profileId=profile_id_from_state
+            )
+            
+            user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "pinterest" and a.account_id == p_id)]
+            user.linked_accounts.append(linked_account)
+            
+            if new_user:
+                await user.insert()
+            else:
+                await user.save()
+
+            # Redirect
+            jwt_token = create_access_token(data={"sub": str(user.id)})
+            redirect_params = f"platform=pinterest&token={jwt_token}"
+            if api_key_to_return:
+                redirect_params += f"&apiKey={api_key_to_return}"
+            return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
+
+        if platform == "threads":
+            # 1. Exchange Code
+            token_data = await threads.exchange_code(
+                client_id=os.getenv("THREADS_APP_ID", os.getenv("FACEBOOK_APP_ID")),
+                client_secret=os.getenv("THREADS_APP_SECRET", os.getenv("FACEBOOK_APP_SECRET")),
+                redirect_uri=os.getenv("THREADS_REDIRECT_URI"),
+                code=code
+            )
+            access_token = token_data.get("access_token")
+            user_id = str(token_data.get("user_id")) # Threads ID
+            
+            # 2. Get Profile
+            # Note: exchange_code response might have user_id. 
+            # We can also fetch /me
+            try:
+                profile = await threads.get_user_info(access_token)
+                t_id = profile.get("id")
+                t_name = profile.get("username") or profile.get("name")
+                t_pic = profile.get("threads_profile_picture_url")
+            except Exception as e:
+                logger.warning(f"Threads profile fetch failed: {e}")
+                t_id = user_id
+                t_name = "Threads User"
+                t_pic = None
+
+            # 3. Find/Create User
+            user = None
+            if user_id_from_state:
+                user = await User.get(user_id_from_state)
+            
+            if not user:
+                user = await User.find_one({
+                    "linkedAccounts.platform": "threads",
+                    "linkedAccounts.accountId": t_id
+                })
+            
+            api_key_to_return = None
+            new_user = False
+            if not user:
+                api_key_to_return = f"hs_{uuid.uuid4().hex}"
+                user = User(
+                     apiKeyHash=hash_key(api_key_to_return),
+                     linkedAccounts=[]
+                )
+                new_user = True
+
+            # 4. Link Account
+            current_account = next((a for a in user.linked_accounts if a.platform == "threads" and a.account_id == t_id), None)
+            
+            if not current_account and len(user.linked_accounts) >= user.max_profiles:
+                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached")
+
+            linked_account = LinkedAccount(
+                platform="threads",
+                accountId=t_id,
+                username=t_name,
+                displayName=t_name,
+                picture=t_pic,
+                accessTokenEnc=encrypt_token(access_token),
+                expiresAt=None, # Long-lived usually?
+                rawProfile=profile,
+                profileId=profile_id_from_state
+            )
+            
+            user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "threads" and a.account_id == t_id)]
+            user.linked_accounts.append(linked_account)
+            
+            if new_user:
+                await user.insert()
+            else:
+                await user.save()
+
+            jwt_token = create_access_token(data={"sub": str(user.id)})
+            redirect_params = f"platform=threads&token={jwt_token}"
+            if api_key_to_return:
+                redirect_params += f"&apiKey={api_key_to_return}"
+            return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
+
+        if platform == "mastodon":
+            # 1. Recover State to get instance_url, client_id, client_secret
+            oauth_data = await OAuthState.find_one({"state_id": state_id})
+            if not oauth_data or not oauth_data.extra_data:
+                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Invalid session state. Please try again.")
+            
+            instance_url = oauth_data.extra_data.get("instance_url")
+            client_id = oauth_data.extra_data.get("client_id")
+            client_secret = oauth_data.extra_data.get("client_secret")
+            redirect_uri = oauth_data.extra_data.get("redirect_uri")
+            
+            # 2. Exchange Code
+            token_data = await mastodon.exchange_code(
+                instance_url,
+                client_id,
+                client_secret,
+                redirect_uri,
+                code
+            )
+            access_token = token_data.get("access_token")
+            
+            # 3. Verify Credentials (Get User Info)
+            account = await mastodon.get_account_verify_credentials(instance_url, access_token)
+            
+            m_id = account.get("id")
+            m_username = account.get("username")
+            m_display = account.get("display_name")
+            m_pic = account.get("avatar")
+            m_acct = account.get("acct") # user@instance
+            
+            full_handler = f"{m_acct}@{instance_url.replace('https://', '').replace('http://', '')}"
+            
+            # 4. Find/Create User
+            user = None
+            if user_id_from_state:
+                user = await User.get(user_id_from_state)
+            
+            if not user:
+                # Check for existing link
+                user = await User.find_one({
+                    "linkedAccounts.platform": "mastodon",
+                    "linkedAccounts.accountId": m_id,
+                    "linkedAccounts.server": instance_url # Important since IDs can collide across instances? Less likely but safe.
+                })
+            
+            api_key_to_return = None
+            new_user = False
+            if not user:
+                api_key_to_return = f"hs_{uuid.uuid4().hex}"
+                user = User(
+                     apiKeyHash=hash_key(api_key_to_return),
+                     linkedAccounts=[]
+                )
+                new_user = True
+
+            # 5. Link Account
+            # We need to store instance_url in the LinkedAccount object. 
+            # Assuming LinkedAccount has 'meta' or 'extra' field, or we abuse 'refreshTokenEnc' or similar?
+            # Or assume we just store it in rawProfile. 
+            # Actually, `LinkedAccount` model might not have a generic 'server' field. 
+            # We should probably update the model or just store it in `rawProfile` and parse it out.
+            # But wait, we need it for publishing calls.
+            # Let's check `LinkedAccount` definition. If strictly typed, we might need a migration.
+            # Only `accountId`, `username`, `displayName`, `accessTokenEnc` etc are standard.
+            # We will store `instance_url` in `username` or `displayName`? No.
+            # We can store it in `accessTokenEnc` if we combine it "INSTANCE|TOKEN" ? Hacky.
+            # Better: `rawProfile` stores it. `publishing_service` reads it from `rawProfile`.
+            
+            account["_instance_url"] = instance_url # Inject into raw profile
+            
+            current_account = next((a for a in user.linked_accounts if a.platform == "mastodon" and a.account_id == m_id), None)
+            if not current_account and len(user.linked_accounts) >= user.max_profiles:
+                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached")
+
+            linked_account = LinkedAccount(
+                platform="mastodon",
+                accountId=m_id,
+                username=full_handler,
+                displayName=m_display,
+                picture=m_pic,
+                accessTokenEnc=encrypt_token(access_token),
+                rawProfile=account,
+                profileId=profile_id_from_state
+            )
+            
+            user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "mastodon" and a.account_id == m_id)]
+            user.linked_accounts.append(linked_account)
+            
+            if new_user:
+                await user.insert()
+            else:
+                await user.save()
+            
+            # Cleanup state
+            await oauth_data.delete()
+
+            jwt_token = create_access_token(data={"sub": str(user.id)})
+            redirect_params = f"platform=mastodon&token={jwt_token}"
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
