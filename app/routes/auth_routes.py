@@ -442,6 +442,56 @@ async def connect_platform(
 
     raise HTTPException(status_code=400, detail=f"Platform {platform} not supported yet")
 
+class BlueskyLogin(BaseModel):
+    handle: str
+    app_password: str
+    profile_id: str = None
+
+@router.post("/connect/bluesky")
+async def connect_bluesky(data: BlueskyLogin, user: User = Depends(get_current_user)):
+    try:
+        # 1. Login to Bluesky
+        session = await bluesky.login(data.handle, data.app_password)
+        
+        did = session.get("did")
+        handle = session.get("handle")
+        access_jwt = session.get("accessJwt")
+        refresh_jwt = session.get("refreshJwt")
+        
+        # 2. Get Profile (Verification)
+        profile = await bluesky.get_profile(access_jwt, did)
+        
+        # 3. Create Linked Account
+        linked_account = LinkedAccount(
+            platform="bluesky",
+            accountId=did,
+            username=handle,
+            displayName=profile.get("displayName", handle),
+            picture=profile.get("avatar"),
+            accessTokenEnc=encrypt_token(access_jwt),
+            refreshTokenEnc=encrypt_token(refresh_jwt) if refresh_jwt else None,
+            rawProfile=session, # Store session data as raw profile or mix
+            profileId=data.profile_id
+        )
+        
+        # 4. Link to User
+        # Remove old if exists
+        user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "bluesky" and a.account_id == did)]
+        
+        # Check limit
+        if len(user.linked_accounts) >= user.max_profiles:
+             raise HTTPException(status_code=400, detail=f"Plan Limit Reached: Max {user.max_profiles} profiles allow.")
+
+        user.linked_accounts.append(linked_account)
+        await user.save()
+        
+        return {"status": "connected", "account": handle}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=f"Bluesky Login Failed: {str(e)}")
+
 # Support both /auth/{platform}/callback AND /connect/{platform}/callback
 @router.get("/{platform}/callback")
 async def oauth_callback(
