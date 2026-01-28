@@ -99,22 +99,35 @@ async def get_accounts(access_token: str):
             res = await client.get(
                 "https://graph.facebook.com/v19.0/me/accounts",
                 params={
-                    "fields": "id,name,access_token,picture", # Simplified to debug "No Pages" issue
+                    "fields": "id,name,access_token,picture,instagram_business_account,tasks", 
+                    "limit": "100",
                     "access_token": access_token
                 }
             )
             
             logger.info(f"Facebook API Response Status: {res.status_code}")
-            logger.info(f"Facebook API Response Headers: {dict(res.headers)}")
-            logger.info(f"Facebook API Response Body: {res.text}")
-            
             res.raise_for_status()
             data = res.json()
             
-            pages = data.get("data", [])
-            logger.info(f"Facebook Pages Found: {len(pages)} pages")
+            all_pages = data.get("data", [])
             
-            return pages
+            # Pagination
+            next_page = data.get("paging", {}).get("next")
+            while next_page:
+                try:
+                    logger.info("Fetching next page of Facebook Accounts...")
+                    res = await client.get(next_page)
+                    res.raise_for_status()
+                    data = res.json()
+                    all_pages.extend(data.get("data", []))
+                    next_page = data.get("paging", {}).get("next")
+                except Exception as e:
+                    logger.error(f"Error fetching next page: {e}")
+                    break
+
+            logger.info(f"Facebook Pages Found: {len(all_pages)} pages")
+            
+            return all_pages
         except httpx.HTTPStatusError as e:
             logger.error(f"Facebook API Error: {e.response.status_code} - {e.response.text}")
             raise

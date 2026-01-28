@@ -330,7 +330,9 @@ async def connect_platform(
             "pages_manage_posts", 
             "pages_read_engagement",
             "pages_manage_metadata",  # Required to access pages list
-            "pages_read_user_content"  # Required to read page content
+            "pages_read_user_content",  # Required to read page content
+            "business_management", # Required to see Pages owned by a Business Manager
+            "read_insights" # For analytics
         ]
         
         env_scopes = os.getenv("FACEBOOK_SCOPES", "").split(",")
@@ -544,8 +546,9 @@ async def oauth_callback(
                 error_msg = (
                     f"No Facebook Pages found. "
                     f"Please ensure: (1) You manage at least one Facebook Page, "
-                    f"(2) You granted all permissions during authorization. "
-                    f"Granted permissions: {perm_list}"
+                    f"(2) You granted all permissions (including 'business_management' if using a Business Account) during authorization. "
+                    f"Granted permissions: {perm_list}. "
+                    f"If you are using a Business Account, ensure this App is added to your Business Manager."
                 )
                 return RedirectResponse(f"{frontend_url}/auth/callback?error={error_msg}")
 
