@@ -3,6 +3,9 @@ from fastapi.responses import RedirectResponse
 import os
 import uuid
 import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 from app.utils.auth import (
     get_current_user, 
     get_optional_user, 
