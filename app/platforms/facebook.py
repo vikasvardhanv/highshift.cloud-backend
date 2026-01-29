@@ -121,7 +121,7 @@ async def get_accounts(access_token: str):
             res = await client.get(
                 "https://graph.facebook.com/v19.0/me/accounts",
                 params={
-                    "fields": "id,name,access_token,picture,instagram_business_account,tasks", 
+                    "fields": "id,name,access_token,picture,instagram_business_account{id,name,username,profile_picture_url},tasks", 
                     "limit": "100",
                     "access_token": access_token
                 }

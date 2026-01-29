@@ -27,16 +27,42 @@ async def publish_content(
     Returns a dict with results.
     """
     results = []
+    temp_files_to_cleanup = []
     
     # Determine media types for all media
     media_items = [] # List of {url: str, path: str, is_video: bool}
     
-    # Map by index since we have local_media_paths Corresponding to media_urls (usually)
-    # But local_media_paths might be populated from downloads of media_urls.
-    
-    for i in range(max(len(media_urls), len(local_media_paths))):
-        u = media_urls[i] if i < len(media_urls) else None
-        p = local_media_paths[i] if i < len(local_media_paths) else None
+    # If media_urls contain data:image/base64 strings, we must save them to files
+    processed_media_urls = []
+    processed_local_paths = list(local_media_paths) if local_media_paths else []
+
+    for url in media_urls:
+        if url.startswith("data:"):
+            try:
+                # Extract mime type and base64 data
+                header, encoded = url.split(",", 1)
+                mime = header.split(";", 1)[0].split(":", 1)[1]
+                ext = mimetypes.guess_extension(mime) or ".jpg"
+                
+                # Save to temporary file
+                fd, path = tempfile.mkstemp(suffix=ext)
+                with os.fdopen(fd, 'wb') as tmp:
+                    tmp.write(base64.b64decode(encoded))
+                
+                processed_local_paths.append(path)
+                temp_files_to_cleanup.append(path)
+                processed_media_urls.append(None) # Can't use base64 as URL for most APIs
+                logger.info(f"Decoded base64 media to {path}")
+            except Exception as e:
+                logger.error(f"Failed to decode base64 media: {e}")
+                processed_media_urls.append(url) # Fallback (will likely fail later but safe)
+        else:
+            processed_media_urls.append(url)
+
+    # Re-align media items based on processed inputs
+    for i in range(max(len(processed_media_urls), len(processed_local_paths))):
+        u = processed_media_urls[i] if i < len(processed_media_urls) else None
+        p = processed_local_paths[i] if i < len(processed_local_paths) else None
         
         # Check if video
         is_v = False
@@ -118,31 +144,51 @@ async def publish_content(
 
             # --- INSTAGRAM ---
             elif platform == "instagram":
-                if not media_urls:
+                if not media_items:
                     results.append({"platform": "instagram", "status": "failed", "error": "Media required for Instagram"})
                     continue
                 
+                # Use processed media_urls for polling if needed, but carousel uses items
+                urls_for_ig = [item["url"] for item in media_items if item["url"]]
+                if not urls_for_ig and not any(item["path"] for item in media_items):
+                    results.append({"platform": "instagram", "status": "failed", "error": "Instagram requires public URLs for media."})
+                    continue
+
                 if len(media_items) > 1:
                     res = await instagram.publish_carousel(token, account_id, media_items, content)
                 elif is_video:
-                    res = await instagram.publish_video(token, account_id, media_urls[0], content)
+                    # Video always needs a URL for IG via Graph API
+                    video_url = media_items[0]["url"]
+                    if not video_url:
+                         results.append({"platform": "instagram", "status": "failed", "error": "Instagram Video requires a public URL."})
+                         continue
+                    res = await instagram.publish_video(token, account_id, video_url, content)
                 else:
-                    res = await instagram.publish_image(token, account_id, media_urls[0], content)
+                    image_url = media_items[0]["url"]
+                    if not image_url:
+                         results.append({"platform": "instagram", "status": "failed", "error": "Instagram Image requires a public URL."})
+                         continue
+                    res = await instagram.publish_image(token, account_id, image_url, content)
                 
                 results.append({"platform": "instagram", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to Instagram", platform="Instagram", type="success").insert()
 
             # --- FACEBOOK ---
             elif platform == "facebook":
-                if media_urls:
+                fb_urls = [item["url"] for item in media_items if item["url"]]
+                if fb_urls:
                     if is_video:
-                         # FB doesn't easily support multi-video in one post via API usually, 
-                         # so we post the first one or handle separately.
-                         res = await facebook.post_video(token, account_id, content, media_urls[0])
+                         res = await facebook.post_video(token, account_id, content, fb_urls[0])
                     else:
-                         res = await facebook.post_photo(token, account_id, content, media_urls)
-                else:
+                         res = await facebook.post_photo(token, account_id, content, fb_urls)
+                elif link_in_text:
                     res = await facebook.post_to_page(token, account_id, content, link=link_in_text)
+                else:
+                    # If only local paths, FB API doesn't support direct upload via simple post_photo URL 
+                    # unless using Multipart (which our facebook.py doesn't yet).
+                    # For now, return error instead of crashing with 500
+                    results.append({"platform": "facebook", "status": "failed", "error": "Facebook requires public URLs or Link."})
+                    continue
                 
                 results.append({"platform": "facebook", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to Facebook", platform="Facebook", type="success").insert()

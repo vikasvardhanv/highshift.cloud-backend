@@ -84,18 +84,29 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="HighShift AI Backend", version="1.0.0", lifespan=lifespan)
 
 # CORS configuration
-origins = os.getenv("CORS_ORIGINS", "*").split(",")
-# Explicitly add production domains
-origins.extend(["https://highshift.cloud", "https://www.highshift.cloud"])
+# Priority: Get from env, but handle the case where env is empty or just "*"
+env_origins = os.getenv("CORS_ORIGINS", "").split(",")
+origins = [o.strip() for o in env_origins if o.strip()]
 
-# Handle wildcard with credentials correctly
-if "*" in origins:
+# Explicitly add production and common dev domains
+production_domains = [
+    "https://highshift.cloud", 
+    "https://www.highshift.cloud",
+    "https://highshift-cloud.vercel.app"
+]
+for d in production_domains:
+    if d not in origins:
+        origins.append(d)
+
+# For development, if "*" is in origins, we allow all
+if "*" in origins or not origins:
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=".*",  # Allows all origins with credentials (DEV ONLY)
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"]
     )
 else:
     app.add_middleware(
@@ -104,7 +115,41 @@ else:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"]
     )
+
+# --- Global Exception Handler to Ensure CORS Headers on 500s ---
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class ErrorMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        try:
+            response = await call_next(request)
+            return response
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("main")
+            logger.error(f"Unhandled Exception: {e}", exc_info=True)
+            
+            # Create error response
+            content = {"detail": "Internal Server Error", "error": str(e)}
+            response = JSONResponse(status_code=500, content=content)
+            
+            # MANUALLY ADD CORS HEADERS for errors
+            origin = request.headers.get("origin")
+            if origin:
+                # Basic check: allow if in our list or if we are in wildcard mode
+                if "*" in origins or origin in origins:
+                    response.headers["Access-Control-Allow-Origin"] = origin
+                    response.headers["Access-Control-Allow-Credentials"] = "true"
+                    response.headers["Access-Control-Allow-Methods"] = "*"
+                    response.headers["Access-Control-Allow-Headers"] = "*"
+            
+            return response
+
+app.add_middleware(ErrorMiddleware)
 
 # Include Routers
 app.include_router(ai_routes.router)
