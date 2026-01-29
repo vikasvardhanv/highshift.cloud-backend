@@ -361,8 +361,19 @@ async def connect_platform(
     if platform == "youtube":
         client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
         redirect_uri = os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI")
-        scopes = os.getenv("YOUTUBE_GOOGLE_SCOPES", "https://www.googleapis.com/auth/youtube.upload").split(",")
-        url = await youtube.get_auth_url(client_id, redirect_uri, state, scopes)
+        # Ensure readonly and OIDC scopes are present to avoid 403 on get_me
+        default_scopes = [
+            "https://www.googleapis.com/auth/youtube.upload",
+            "https://www.googleapis.com/auth/youtube.readonly",
+            "openid",
+            "profile",
+            "email"
+        ]
+        env_scopes = os.getenv("YOUTUBE_GOOGLE_SCOPES", "").split(",")
+        final_scopes = list(set(default_scopes + [s for s in env_scopes if s]))
+        
+        logger.info(f"YouTube Auth - ClientID: {client_id[:5]}... | RedirectURI: {redirect_uri}")
+        url = await youtube.get_auth_url(client_id, redirect_uri, state, final_scopes)
         return {"authUrl": url}
 
     if platform == "tiktok":
@@ -854,12 +865,17 @@ async def oauth_callback(
 
         if platform == "linkedin":
             # 1. Exchange code
-            token_data = await linkedin.exchange_code(
-                client_id=os.getenv("LINKEDIN_CLIENT_ID"),
-                client_secret=os.getenv("LINKEDIN_CLIENT_SECRET"),
-                redirect_uri=os.getenv("LINKEDIN_REDIRECT_URI"),
-                code=code
-            )
+            try:
+                token_data = await linkedin.exchange_code(
+                    client_id=os.getenv("LINKEDIN_CLIENT_ID"),
+                    client_secret=os.getenv("LINKEDIN_CLIENT_SECRET"),
+                    redirect_uri=os.getenv("LINKEDIN_REDIRECT_URI"),
+                    code=code
+                )
+            except Exception as e:
+                logger.error(f"LinkedIn Token Exchange Failed: {e}")
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=LinkedIn Token Exchange Failed: {str(e)}")
+
             access_token = token_data.get("access_token")
             expires_in = token_data.get("expires_in", 5184000) # Default 60 days
             
@@ -867,8 +883,12 @@ async def oauth_callback(
                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Failed to get Access Token from LinkedIn.")
 
             # 2. Get Profile info
-            profile_info = await linkedin.get_me(access_token)
-            organizations = await linkedin.get_organizations(access_token)
+            try:
+                profile_info = await linkedin.get_me(access_token)
+                organizations = await linkedin.get_organizations(access_token)
+            except Exception as e:
+                logger.error(f"LinkedIn Profile Fetch Failed: {e}")
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=LinkedIn Profile Fetch Failed: {str(e)}")
             
             entities = []
             if profile_info:
@@ -958,12 +978,17 @@ async def oauth_callback(
 
         if platform == "youtube":
             # 1. Exchange Code
-            token_data = await youtube.exchange_code(
-                client_id=os.getenv("YOUTUBE_GOOGLE_CLIENT_ID"),
-                client_secret=os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET"),
-                redirect_uri=os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI"),
-                code=code
-            )
+            try:
+                token_data = await youtube.exchange_code(
+                    client_id=os.getenv("YOUTUBE_GOOGLE_CLIENT_ID"),
+                    client_secret=os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET"),
+                    redirect_uri=os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI"),
+                    code=code
+                )
+            except Exception as e:
+                logger.error(f"YouTube Token Exchange Failed: {e}")
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=Google Token Exchange Failed: {str(e)}")
+
             access_token = token_data.get("access_token")
             refresh_token = token_data.get("refresh_token")
             expires_in = token_data.get("expires_in", 3600)
@@ -972,9 +997,14 @@ async def oauth_callback(
                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Failed to get Access Token from Google.")
 
             # 2. Get Channel Info
-            channel_info = await youtube.get_me(access_token)
+            try:
+                channel_info = await youtube.get_me(access_token)
+            except Exception as e:
+                logger.error(f"YouTube Channel Fetch Failed: {e}")
+                return RedirectResponse(f"{frontend_url}/auth/callback?error={str(e)}")
+            
             if not channel_info:
-                return RedirectResponse(f"{frontend_url}/auth/callback?error=No YouTube channel found for this account.")
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=No YouTube channel found for this account. Please create one first.")
             
             account_id = channel_info.get("id")
             display_name = channel_info.get("name")

@@ -45,12 +45,21 @@ async def get_me(access_token: str):
             },
             headers={"Authorization": f"Bearer {access_token}"}
         )
+        
+        if res.status_code == 403:
+            error_data = res.json().get("error", {})
+            msg = error_data.get("message", "")
+            if "not enabled" in msg.lower() or "not been used" in msg.lower():
+                raise Exception("YouTube Data API v3 is not enabled in your Google Cloud Project. Please enable it in the console.")
+            raise Exception(f"YouTube 403 Forbidden: {msg}. Ensure you have 'YouTube Data API v3' enabled and the 'youtube.readonly' scope added.")
+            
         res.raise_for_status()
         data = res.json()
         
         items = data.get("items", [])
         if not items:
-            return None
+            # Check if user has a channel at all
+            raise Exception("No YouTube channel found. Please go to YouTube and 'Create a Channel' for this account before connecting.")
             
         channel = items[0]
         snippet = channel.get("snippet", {})
