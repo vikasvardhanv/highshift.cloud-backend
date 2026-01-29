@@ -264,10 +264,10 @@ async def connect_platform(
     
     # Store profile_id in state if present
     if user:
-        # Use '-' instead of ':' as some platforms (LinkedIn) have picky JS trackers
-        state_payload = f"{state_id}-{str(user.id)}"
+        # Use '_' as separator - hyphens conflict with UUID format!
+        state_payload = f"{state_id}_{str(user.id)}"
         if profile_id:
-            state_payload += f"-{profile_id}"
+            state_payload += f"_{profile_id}"
     
     state = state_payload
     logger.info(f"OAuth Step 1: Connecting {platform} | State: {state}")
@@ -349,11 +349,10 @@ async def connect_platform(
 
     if platform == "linkedin":
         client_id = os.getenv("LINKEDIN_CLIENT_ID")
-        redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
-        # Default to minimal scopes if full ones fail, but try full ones first
-        default_scopes = "openid,profile,w_member_social,email"
-        full_scopes = "openid,profile,w_member_social,email"
-        scopes = os.getenv("LINKEDIN_SCOPES", full_scopes).split(",")
+        # Try using the /connect/ path variant which worked for YouTube
+        redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", "").replace("/auth/", "/connect/")
+        
+        scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social,email").split(",")
         
         logger.info(f"LinkedIn Auth Request - ClientID: {client_id} | RedirectURI: {redirect_uri} | Scopes: {scopes}")
         
@@ -552,8 +551,13 @@ async def oauth_callback(
     if not code:
          return RedirectResponse(f"{frontend_url}/dashboard?error=no_code_provided")
          
-    # Support both hyphen (new safer format for LinkedIn) and colon (legacy)
-    state_parts = state.split("-") if "-" in state else state.split(":")
+    # Support underscore (new), hyphen (briefly used), and colon (legacy)
+    if "_" in state:
+        state_parts = state.split("_")
+    elif "-" in state:
+        state_parts = state.split("-")
+    else:
+        state_parts = state.split(":")
     state_id = state_parts[0]
     user_id_from_state = state_parts[1] if len(state_parts) > 1 else None
     profile_id_from_state = state_parts[2] if len(state_parts) > 2 else None
@@ -869,11 +873,12 @@ async def oauth_callback(
         if platform == "linkedin":
             # 1. Exchange code
             try:
-                li_client_id = os.getenv("LINKEDIN_CLIENT_ID")
-                li_client_secret = os.getenv("LINKEDIN_CLIENT_SECRET")
-                li_redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
+                li_client_id = os.getenv("LINKEDIN_CLIENT_ID", "").strip()
+                li_client_secret = os.getenv("LINKEDIN_CLIENT_SECRET", "").strip()
+                # Must match whatever was sent in Step 1 exactly
+                li_redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", "").replace("/auth/", "/connect/").strip()
                 
-                logger.debug(f"LinkedIn Exchange - Code: {code[:5]}... | ClientID: {li_client_id} | Redirect: {li_redirect_uri}")
+                logger.info(f"LinkedIn Token Exchange - ClientID: {li_client_id} | Redirect: {li_redirect_uri}")
                 
                 token_data = await linkedin.exchange_code(
                     client_id=li_client_id,

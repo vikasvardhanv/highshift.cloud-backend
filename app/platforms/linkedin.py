@@ -14,22 +14,11 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
     # LinkedIn scopes should be space-separated. URL encoding should use %20.
     scope_str = " ".join(scopes)
     
-    # Standard v2 authorization endpoint
-    base_url = "https://www.linkedin.com/oauth/v2/authorization"
+    # Manual query string construction for ultimate precision
+    query = f"response_type=code&client_id={client_id}&redirect_uri={urllib.parse.quote(redirect_uri)}&state={urllib.parse.quote(state)}&scope={urllib.parse.quote(scope_str)}"
     
-    params = {
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "state": state,
-        "scope": scope_str
-    }
-    
-    # Use standard urlencode but with quote_via=urllib.parse.quote to ensure %20 (not +)
-    encoded_params = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
-    
-    url = f"{base_url}?{encoded_params}"
-    logger.info(f"LinkedIn Auth Request Generated for Client: {client_id}")
+    url = f"{base_url}?{query}"
+    logger.info(f"DEBUG: LinkedIn COMPLETE AUTH URL: {url}")
     return url
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):
