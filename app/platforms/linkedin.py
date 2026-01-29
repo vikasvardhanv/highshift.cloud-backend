@@ -3,15 +3,29 @@ import urllib.parse
 from app.utils.logger import logger
 
 async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: list):
+    # LinkedIn scopes should be space-separated. URL encoding should use %20, not +.
+    scope_str = " ".join(scopes)
+    
+    # Use the UAS authorize URL or the v2 one. Both should work, but /uas/ is often more robust for redirect matching.
+    # Actually, standardizing on v2 but with manual param building to ensure %20.
+    base_url = "https://www.linkedin.com/oauth/v2/authorization"
+    
     params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "state": state,
-        "scope": " ".join(scopes)
+        "scope": scope_str
     }
-    encoded_params = urllib.parse.urlencode(params)
-    return f"https://www.linkedin.com/oauth/v2/authorization?{encoded_params}"
+    
+    # Manual query string to ensure %20
+    query_parts = []
+    for k, v in params.items():
+        query_parts.append(f"{k}={urllib.parse.quote(v)}")
+    
+    url = f"{base_url}?{'&'.join(query_parts)}"
+    logger.info(f"LinkedIn Auth URL Generated: {url}")
+    return url
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):
     async with httpx.AsyncClient() as client:

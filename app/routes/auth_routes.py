@@ -353,7 +353,7 @@ async def connect_platform(
         full_scopes = "openid,profile,w_member_social,email"
         scopes = os.getenv("LINKEDIN_SCOPES", full_scopes).split(",")
         
-        logger.info(f"LinkedIn Auth - ClientID: {client_id[:5]}... | RedirectURI: {redirect_uri}")
+        logger.info(f"LinkedIn Auth Request - ClientID: {client_id} | RedirectURI: {redirect_uri} | Scopes: {scopes}")
         
         url = await linkedin.get_auth_url(client_id, redirect_uri, state, scopes)
         return {"authUrl": url}
@@ -866,14 +866,22 @@ async def oauth_callback(
         if platform == "linkedin":
             # 1. Exchange code
             try:
+                li_client_id = os.getenv("LINKEDIN_CLIENT_ID")
+                li_client_secret = os.getenv("LINKEDIN_CLIENT_SECRET")
+                li_redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
+                
+                logger.debug(f"LinkedIn Exchange - Code: {code[:5]}... | ClientID: {li_client_id} | Redirect: {li_redirect_uri}")
+                
                 token_data = await linkedin.exchange_code(
-                    client_id=os.getenv("LINKEDIN_CLIENT_ID"),
-                    client_secret=os.getenv("LINKEDIN_CLIENT_SECRET"),
-                    redirect_uri=os.getenv("LINKEDIN_REDIRECT_URI"),
+                    client_id=li_client_id,
+                    client_secret=li_client_secret,
+                    redirect_uri=li_redirect_uri,
                     code=code
                 )
             except Exception as e:
                 logger.error(f"LinkedIn Token Exchange Failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 return RedirectResponse(f"{frontend_url}/auth/callback?error=LinkedIn Token Exchange Failed: {str(e)}")
 
             access_token = token_data.get("access_token")
