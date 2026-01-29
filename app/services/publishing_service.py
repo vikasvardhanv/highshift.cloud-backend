@@ -56,6 +56,8 @@ async def publish_content(
             except Exception as e:
                 logger.error(f"Failed to decode base64 media: {e}")
                 processed_media_urls.append(url) # Fallback (will likely fail later but safe)
+        elif url.startswith("blob:"):
+            return [{"platform": "all", "status": "failed", "error": "Media is still uploading or invalid (blob URL). Please wait a moment and try again."}]
         else:
             processed_media_urls.append(url)
 

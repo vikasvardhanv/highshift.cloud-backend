@@ -39,6 +39,7 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
             params={
                 "image_url": image_url,
+                "media_type": "IMAGE",
                 "caption": caption,
                 "access_token": access_token
             }
