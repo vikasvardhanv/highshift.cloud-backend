@@ -264,11 +264,13 @@ async def connect_platform(
     
     # Store profile_id in state if present
     if user:
-        state_payload = f"{state_id}:{str(user.id)}"
+        # Use '-' instead of ':' as some platforms (LinkedIn) have picky JS trackers
+        state_payload = f"{state_id}-{str(user.id)}"
         if profile_id:
-            state_payload += f":{profile_id}"
+            state_payload += f"-{profile_id}"
     
     state = state_payload
+    logger.info(f"OAuth Step 1: Connecting {platform} | State: {state}")
     
     if platform == "instagram":
         client_id = os.getenv("FACEBOOK_APP_ID")
@@ -550,7 +552,8 @@ async def oauth_callback(
     if not code:
          return RedirectResponse(f"{frontend_url}/dashboard?error=no_code_provided")
          
-    state_parts = state.split(":")
+    # Support both hyphen (new safer format for LinkedIn) and colon (legacy)
+    state_parts = state.split("-") if "-" in state else state.split(":")
     state_id = state_parts[0]
     user_id_from_state = state_parts[1] if len(state_parts) > 1 else None
     profile_id_from_state = state_parts[2] if len(state_parts) > 2 else None
