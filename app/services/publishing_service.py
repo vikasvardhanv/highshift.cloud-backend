@@ -157,38 +157,31 @@ async def publish_content(
                 if len(media_items) > 1:
                     res = await instagram.publish_carousel(token, account_id, media_items, content)
                 elif is_video:
-                    # Video always needs a URL for IG via Graph API
-                    video_url = media_items[0]["url"]
-                    if not video_url:
-                         results.append({"platform": "instagram", "status": "failed", "error": "Instagram Video requires a public URL."})
-                         continue
-                    res = await instagram.publish_video(token, account_id, video_url, content)
+                    res = await instagram.publish_video(token, account_id, media_items[0]["url"], content, local_path=media_items[0]["path"])
                 else:
-                    image_url = media_items[0]["url"]
-                    if not image_url:
-                         results.append({"platform": "instagram", "status": "failed", "error": "Instagram Image requires a public URL."})
-                         continue
-                    res = await instagram.publish_image(token, account_id, image_url, content)
+                    res = await instagram.publish_image(token, account_id, media_items[0]["url"], content, local_path=media_items[0]["path"])
                 
                 results.append({"platform": "instagram", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to Instagram", platform="Instagram", type="success").insert()
 
             # --- FACEBOOK ---
             elif platform == "facebook":
-                fb_urls = [item["url"] for item in media_items if item["url"]]
-                if fb_urls:
-                    if is_video:
-                         res = await facebook.post_video(token, account_id, content, fb_urls[0])
-                    else:
-                         res = await facebook.post_photo(token, account_id, content, fb_urls)
+                if is_video:
+                    res = await facebook.post_video(
+                        token, account_id, content, 
+                        media_items[0]["url"], 
+                        local_path=media_items[0]["path"]
+                    )
+                elif media_items:
+                    res = await facebook.post_photo(
+                        token, account_id, content, 
+                        [m["url"] for m in media_items],
+                        local_paths=[m["path"] for m in media_items]
+                    )
                 elif link_in_text:
                     res = await facebook.post_to_page(token, account_id, content, link=link_in_text)
                 else:
-                    # If only local paths, FB API doesn't support direct upload via simple post_photo URL 
-                    # unless using Multipart (which our facebook.py doesn't yet).
-                    # For now, return error instead of crashing with 500
-                    results.append({"platform": "facebook", "status": "failed", "error": "Facebook requires public URLs or Link."})
-                    continue
+                    res = await facebook.post_to_page(token, account_id, content)
                 
                 results.append({"platform": "facebook", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to Facebook", platform="Facebook", type="success").insert()

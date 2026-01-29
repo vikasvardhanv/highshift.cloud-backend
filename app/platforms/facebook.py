@@ -41,30 +41,51 @@ async def post_to_page(access_token: str, page_id: str, message: str, link: str 
         res.raise_for_status()
         return res.json()
 
-async def post_photo(access_token: str, page_id: str, message: str, image_urls: list):
+async def post_photo(access_token: str, page_id: str, message: str, image_urls: list, local_paths: list = None):
     """
     Post one or more photos to a Facebook Page.
+    Supports both public URLs and local file paths.
     """
     async with httpx.AsyncClient() as client:
+        # Normalize local_paths to match image_urls length
+        paths = local_paths or [None] * len(image_urls)
+        
         if len(image_urls) == 1:
             # Single photo post
-            params = {
-                "url": image_urls[0],
-                "caption": message,
-                "access_token": access_token
-            }
-            res = await client.post(f"https://graph.facebook.com/v19.0/{page_id}/photos", params=params)
+            data = {"caption": message, "access_token": access_token}
+            files = None
+            params = {}
+            
+            if paths[0] and os.path.exists(paths[0]):
+                files = {"source": open(paths[0], "rb")}
+            else:
+                params["url"] = image_urls[0]
+            
+            res = await client.post(
+                f"https://graph.facebook.com/v19.0/{page_id}/photos", 
+                params=params if not files else {"access_token": access_token, "caption": message}, 
+                data=data if files else None,
+                files=files
+            )
         else:
             # Multi-photo post
-            # 1. Upload each photo as unpublished (published=false)
             media_fbid_list = []
-            for url in image_urls:
-                params = {
-                    "url": url,
-                    "published": "false",
-                    "access_token": access_token
-                }
-                upload_res = await client.post(f"https://graph.facebook.com/v19.0/{page_id}/photos", params=params)
+            for i, url in enumerate(image_urls):
+                p = paths[i] if i < len(paths) else None
+                data = {"published": "false", "access_token": access_token}
+                files = None
+                params = {}
+                
+                if p and os.path.exists(p):
+                    files = {"source": open(p, "rb")}
+                else:
+                    params["url"] = url
+                    
+                upload_res = await client.post(
+                    f"https://graph.facebook.com/v19.0/{page_id}/photos", 
+                    params=params if not files else {"access_token": access_token, "published": "false"}, 
+                    files=files
+                )
                 upload_res.raise_for_status()
                 media_fbid_list.append(upload_res.json().get("id"))
             
@@ -81,21 +102,27 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
         res.raise_for_status()
         return res.json()
 
-async def post_video(access_token: str, page_id: str, message: str, video_url: str):
+async def post_video(access_token: str, page_id: str, message: str, video_url: str, local_path: str = None):
     """
-    Post a video to a Facebook Page using a video URL.
+    Post a video to a Facebook Page.
+    Supports both public URL (file_url) and local file (source).
     """
     async with httpx.AsyncClient() as client:
-        params = {
-            "file_url": video_url,
-            "description": message,
-            "access_token": access_token
-        }
+        data = {"description": message, "access_token": access_token}
+        files = None
+        params = {}
+        
+        if local_path and os.path.exists(local_path):
+            # For videos, Facebook prefers the 'source' parameter in a multipart form
+            files = {"source": open(local_path, "rb")}
+        else:
+            params["file_url"] = video_url
         
         # Facebook Video API: https://graph.facebook.com/{page-id}/videos
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{page_id}/videos",
-            params=params
+            params=params if not files else {"access_token": access_token, "description": message},
+            files=files
         )
         res.raise_for_status()
         return res.json()

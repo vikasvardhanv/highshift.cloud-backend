@@ -25,16 +25,25 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
         res.raise_for_status()
         return res.json()
 
-async def publish_image(access_token: str, ig_user_id: str, image_url: str, caption: str):
+import os
+
+async def publish_image(access_token: str, ig_user_id: str, image_url: str, caption: str, local_path: str = None):
     async with httpx.AsyncClient() as client:
         # 1. Create container
+        params = {
+            "caption": caption,
+            "access_token": access_token
+        }
+        files = None
+        if local_path and os.path.exists(local_path):
+            files = {"image_url": open(local_path, "rb")}
+        else:
+            params["image_url"] = image_url
+
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
-            params={
-                "image_url": image_url,
-                "caption": caption,
-                "access_token": access_token
-            }
+            params=params if not files else {"access_token": access_token, "caption": caption},
+            files=files
         )
         res.raise_for_status()
         container_id = res.json().get("id")
@@ -47,17 +56,26 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         pub_res.raise_for_status()
         return pub_res.json()
 
-async def publish_video(access_token: str, ig_user_id: str, video_url: str, caption: str):
+async def publish_video(access_token: str, ig_user_id: str, video_url: str, caption: str, local_path: str = None):
     async with httpx.AsyncClient() as client:
         # 1. Create container
+        params = {
+            "media_type": "VIDEO",
+            "caption": caption,
+            "access_token": access_token
+        }
+        files = None
+        if local_path and os.path.exists(local_path):
+            # Instagram requires video to be uploaded as 'video_url' normally, 
+            # but 'video_url' in multipart form is also supported for some endpoints.
+            files = {"video_url": open(local_path, "rb")}
+        else:
+            params["video_url"] = video_url
+
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
-            params={
-                "media_type": "VIDEO",
-                "video_url": video_url,
-                "caption": caption,
-                "access_token": access_token
-            }
+            params=params if not files else {"access_token": access_token, "media_type": "VIDEO", "caption": caption},
+            files=files
         )
         res.raise_for_status()
         container_id = res.json().get("id")
@@ -70,8 +88,11 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
                 f"https://graph.facebook.com/v19.0/{container_id}",
                 params={"fields": "status_code", "access_token": access_token}
             )
-            if status_res.json().get("status_code") == "FINISHED":
+            data = status_res.json()
+            if data.get("status_code") == "FINISHED":
                 break
+            if data.get("status_code") == "ERROR":
+                raise Exception(f"Instagram media processing failed: {data.get('status_msg', 'Unknown Error')}")
             await asyncio.sleep(5)
 
         # 3. Publish
