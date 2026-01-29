@@ -3,11 +3,18 @@ import urllib.parse
 from app.utils.logger import logger
 
 async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: list):
-    # LinkedIn scopes should be space-separated. URL encoding should use %20, not +.
+    # Strip any accidental whitespace from credentials/URIs
+    client_id = client_id.strip()
+    redirect_uri = redirect_uri.strip()
+    
+    # Force HTTPS for production redirects to avoid LinkedIn mismatch issues
+    if "highshift.cloud" in redirect_uri and redirect_uri.startswith("http://"):
+        redirect_uri = redirect_uri.replace("http://", "https://")
+
+    # LinkedIn scopes should be space-separated. URL encoding should use %20.
     scope_str = " ".join(scopes)
     
-    # Use the UAS authorize URL or the v2 one. Both should work, but /uas/ is often more robust for redirect matching.
-    # Actually, standardizing on v2 but with manual param building to ensure %20.
+    # Standard v2 authorization endpoint
     base_url = "https://www.linkedin.com/oauth/v2/authorization"
     
     params = {
@@ -18,13 +25,11 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
         "scope": scope_str
     }
     
-    # Manual query string to ensure %20
-    query_parts = []
-    for k, v in params.items():
-        query_parts.append(f"{k}={urllib.parse.quote(v)}")
+    # Use standard urlencode but with quote_via=urllib.parse.quote to ensure %20 (not +)
+    encoded_params = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
     
-    url = f"{base_url}?{'&'.join(query_parts)}"
-    logger.info(f"LinkedIn Auth URL Generated: {url}")
+    url = f"{base_url}?{encoded_params}"
+    logger.info(f"LinkedIn Auth Request Generated for Client: {client_id}")
     return url
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):

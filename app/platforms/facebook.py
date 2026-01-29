@@ -53,9 +53,8 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
         
         if len(image_urls) == 1:
             # Single photo post
-            data = {"caption": message, "access_token": access_token}
             files = None
-            params = {}
+            params = {"access_token": access_token, "caption": message}
             
             if paths[0] and os.path.exists(paths[0]):
                 files = {"source": open(paths[0], "rb")}
@@ -64,8 +63,7 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
             
             res = await client.post(
                 f"https://graph.facebook.com/v19.0/{page_id}/photos", 
-                params=params if not files else {"access_token": access_token, "caption": message}, 
-                data=data if files else None,
+                params=params, 
                 files=files
             )
         else:

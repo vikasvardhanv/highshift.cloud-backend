@@ -150,10 +150,10 @@ async def publish_content(
                     results.append({"platform": "instagram", "status": "failed", "error": "Media required for Instagram"})
                     continue
                 
-                # Use processed media_urls for polling if needed, but carousel uses items
-                urls_for_ig = [item["url"] for item in media_items if item["url"]]
-                if not urls_for_ig and not any(item["path"] for item in media_items):
-                    results.append({"platform": "instagram", "status": "failed", "error": "Instagram requires public URLs for media."})
+                # Check for public URLs (Instagram requirement)
+                # If we have ONLY paths (common with base64 uploads from frontend), Instagram MUST fail
+                if not any(item["url"] for item in media_items):
+                    results.append({"platform": "instagram", "status": "failed", "error": "Instagram requires a PUBLICLY accessible URL. Base64/Direct uploads are not supported by Instagram's API directly; media must be hosted on a public server first."})
                     continue
 
                 if len(media_items) > 1:
