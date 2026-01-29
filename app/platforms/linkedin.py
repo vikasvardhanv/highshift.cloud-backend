@@ -107,12 +107,21 @@ async def upload_asset(upload_url: str, data: bytes, access_token: str):
         res.raise_for_status()
         return True
 
-async def post_with_media(access_token: str, author_urn: str, text: str, asset_urn: str, media_type: str = "image"):
+async def post_with_media(access_token: str, author_urn: str, text: str, asset_urns: list, media_type: str = "image"):
     """
-    Step 3: Create the UGC post referencing the uploaded asset URN.
+    Step 3: Create the UGC post referencing one or more uploaded asset URNs.
     """
     category = "IMAGE" if media_type == "image" else "VIDEO"
     
+    media_list = []
+    for asset_urn in asset_urns:
+        media_list.append({
+            "status": "READY",
+            "description": {"text": text},
+            "media": asset_urn,
+            "title": {"text": text[:200]} 
+        })
+
     async with httpx.AsyncClient() as client:
         body = {
             "author": author_urn,
@@ -121,17 +130,10 @@ async def post_with_media(access_token: str, author_urn: str, text: str, asset_u
                 "com.linkedin.ugc.ShareContent": {
                     "shareCommentary": {"text": text},
                     "shareMediaCategory": category,
-                    "media": [
-                        {
-                            "status": "READY",
-                            "description": {"text": text},
-                            "media": asset_urn,
-                            "title": {"text": text[:200]} 
-                        }
-                    ]
+                    "media": media_list
                 }
             },
-            "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"}
+            "visibility": {"com.linkedin.MemberNetworkVisibility": "PUBLIC"}
         }
         res = await client.post(
             "https://api.linkedin.com/v2/ugcPosts",

@@ -24,7 +24,24 @@ async def login(identifier: str, password: str):
         res.raise_for_status()
         return res.json()
 
-async def create_record(access_token: str, did: str, text: str):
+async def upload_blob(access_token: str, image_data: bytes, content_type: str = "image/jpeg"):
+    """
+    Upload an image blob to Bluesky/ATProto.
+    Returns the blob reference.
+    """
+    async with httpx.AsyncClient() as client:
+        res = await client.post(
+            f"{BSKY_SERVER}/xrpc/com.atproto.repo.uploadBlob",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": content_type
+            },
+            content=image_data
+        )
+        res.raise_for_status()
+        return res.json().get("blob")
+
+async def create_record(access_token: str, did: str, text: str, embed: dict = None):
     """
     Post a status update (feed item).
     """
@@ -38,6 +55,9 @@ async def create_record(access_token: str, did: str, text: str):
         "text": text,
         "createdAt": now_iso
     }
+    
+    if embed:
+        record["embed"] = embed
     
     payload = {
         "repo": did,

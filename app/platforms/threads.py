@@ -45,30 +45,82 @@ async def get_user_info(access_token: str):
         res.raise_for_status()
         return res.json()
 
-async def post_thread(access_token: str, user_id: str, text: str, media_url: str = None, media_type: str = "IMAGE"):
+async def post_thread(access_token: str, user_id: str, text: str, media_urls: list = None):
     """
-    Publish a Thread. Two-step process: Create Container -> Publish Container.
+    Publish a Thread. Supports multiple items (Carousel).
+    media_urls: List of dicts with {url, is_video}
     """
     async with httpx.AsyncClient() as client:
-        # Step 1: Create Container
-        params = {
-            "access_token": access_token,
-            "media_type": media_type,
-            "text": text
-        }
-        if media_url:
-            if media_type == "IMAGE":
-                params["image_url"] = media_url
-            elif media_type == "VIDEO":
-                params["video_url"] = media_url
-        
-        container_res = await client.post(
-            f"{GRAPH_API_BASE}/{user_id}/threads",
-            params=params
-        )
-        container_res.raise_for_status()
-        container_id = container_res.json().get("id")
-        
+        if not media_urls:
+            # Text-only post
+            res = await client.post(
+                f"{GRAPH_API_BASE}/{user_id}/threads",
+                params={"access_token": access_token,"text": text,"media_type": "TEXT"}
+            )
+            res.raise_for_status()
+            container_id = res.json().get("id")
+        elif len(media_urls) == 1:
+            # Single item post
+            item = media_urls[0]
+            params = {"access_token": access_token, "text": text}
+            if item.get("is_video"):
+                params["media_type"] = "VIDEO"
+                params["video_url"] = item["url"]
+            else:
+                params["media_type"] = "IMAGE"
+                params["image_url"] = item["url"]
+            
+            res = await client.post(f"{GRAPH_API_BASE}/{user_id}/threads", params=params)
+            res.raise_for_status()
+            container_id = res.json().get("id")
+        else:
+            # Multi-item (Carousel)
+            item_ids = []
+            for item in media_urls:
+                params = {"access_token": access_token, "is_carousel_item": "true"}
+                if item.get("is_video"):
+                    params["media_type"] = "VIDEO"
+                    params["video_url"] = item["url"]
+                else:
+                    params["media_type"] = "IMAGE"
+                    params["image_url"] = item["url"]
+                
+                res = await client.post(f"{GRAPH_API_BASE}/{user_id}/threads", params=params)
+                res.raise_for_status()
+                item_ids.append(res.json().get("id"))
+            
+            # Wait for items to process
+            import asyncio
+            for c_id in item_ids:
+                for _ in range(20):
+                    s_res = await client.get(f"{GRAPH_API_BASE}/{c_id}", params={"fields": "status", "access_token": access_token})
+                    if s_res.json().get("status") == "FINISHED": break
+                    await asyncio.sleep(3)
+            
+            # Carousel Container
+            res = await client.post(
+                f"{GRAPH_API_BASE}/{user_id}/threads",
+                params={
+                    "media_type": "CAROUSEL",
+                    "children": ",".join(item_ids),
+                    "text": text,
+                    "access_token": access_token
+                }
+            )
+            res.raise_for_status()
+            container_id = res.json().get("id")
+
+        # Polling for processing completion before publishing
+        import asyncio
+        for _ in range(30):
+            status_res = await client.get(
+                f"{GRAPH_API_BASE}/{container_id}",
+                params={"fields": "status", "access_token": access_token}
+            )
+            if status_res.json().get("status") == "FINISHED":
+                break
+            await asyncio.sleep(5)
+            
         # Step 2: Publish Container
         publish_res = await client.post(
             f"{GRAPH_API_BASE}/{user_id}/threads_publish",

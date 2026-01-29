@@ -28,8 +28,7 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
 async def publish_image(access_token: str, ig_user_id: str, image_url: str, caption: str):
     async with httpx.AsyncClient() as client:
         # 1. Create container
-        # Supported params: https://developers.facebook.com/docs/instagram-api/reference/ig-user/media
-        create_res = await client.post(
+        res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
             params={
                 "image_url": image_url,
@@ -37,28 +36,21 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
                 "access_token": access_token
             }
         )
-        create_res.raise_for_status()
-        container_id = create_res.json().get("id")
+        res.raise_for_status()
+        container_id = res.json().get("id")
 
-        # 2. Publish container
+        # 2. Publish
         pub_res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
-            params={
-                "creation_id": container_id,
-                "access_token": access_token
-            }
+            params={"creation_id": container_id, "access_token": access_token}
         )
         pub_res.raise_for_status()
         return pub_res.json()
 
 async def publish_video(access_token: str, ig_user_id: str, video_url: str, caption: str):
-    """
-    Publish a video to Instagram (Reels/Feed).
-    Note: video_url must be public and accessible by Facebook servers.
-    """
     async with httpx.AsyncClient() as client:
-        # 1. Create container with media_type=VIDEO
-        create_res = await client.post(
+        # 1. Create container
+        res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
             params={
                 "media_type": "VIDEO",
@@ -67,35 +59,83 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
                 "access_token": access_token
             }
         )
-        create_res.raise_for_status()
-        container_id = create_res.json().get("id")
+        res.raise_for_status()
+        container_id = res.json().get("id")
 
-        # 2. Check status (Video upload is async on IG side)
-        # We need to wait until status_code is FINISHED
+        # 2. Poll
         import asyncio
-        max_retries = 10
+        max_retries = 30
         for _ in range(max_retries):
             status_res = await client.get(
                 f"https://graph.facebook.com/v19.0/{container_id}",
-                params={
-                    "fields": "status_code,status",
-                    "access_token": access_token
-                }
+                params={"fields": "status_code", "access_token": access_token}
             )
-            status_data = status_res.json()
-            if status_data.get("status_code") == "FINISHED":
+            if status_res.json().get("status_code") == "FINISHED":
                 break
-            if status_data.get("status_code") == "ERROR":
-                 raise Exception(f"Instagram Video Processing Failed: {status_data}")
-            await asyncio.sleep(2) # Poll every 2s
-            
-        # 3. Publish container
+            await asyncio.sleep(5)
+
+        # 3. Publish
         pub_res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
+            params={"creation_id": container_id, "access_token": access_token}
+        )
+        pub_res.raise_for_status()
+        return pub_res.json()
+
+async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list, caption: str):
+    """
+    Publish a carousel (multi-item) post to Instagram.
+    media_urls: List of dicts with {url, is_video}
+    """
+    async with httpx.AsyncClient() as client:
+        # 1. Create individual item containers
+        item_ids = []
+        for item in media_urls:
+            params = {
+                "access_token": access_token,
+                "is_carousel_item": "true",
+                "caption": caption # Caption is technically ignored for carousel items but good to have
+            }
+            if item.get("is_video"):
+                params["media_type"] = "VIDEO"
+                params["video_url"] = item["url"]
+            else:
+                params["image_url"] = item["url"]
+                
+            res = await client.post(f"https://graph.facebook.com/v19.0/{ig_user_id}/media", params=params)
+            res.raise_for_status()
+            item_ids.append(res.json().get("id"))
+
+        # 2. Wait for items to process (especially videos)
+        import asyncio
+        for container_id in item_ids:
+            max_retries = 20
+            for _ in range(max_retries):
+                status_res = await client.get(
+                    f"https://graph.facebook.com/v19.0/{container_id}",
+                    params={"fields": "status_code", "access_token": access_token}
+                )
+                if status_res.json().get("status_code") == "FINISHED":
+                    break
+                await asyncio.sleep(3)
+
+        # 3. Create carousel container
+        carousel_res = await client.post(
+            f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
             params={
-                "creation_id": container_id,
+                "media_type": "CAROUSEL",
+                "children": ",".join(item_ids),
+                "caption": caption,
                 "access_token": access_token
             }
+        )
+        carousel_res.raise_for_status()
+        carousel_id = carousel_res.json().get("id")
+
+        # 4. Publish carousel
+        pub_res = await client.post(
+            f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
+            params={"creation_id": carousel_id, "access_token": access_token}
         )
         pub_res.raise_for_status()
         return pub_res.json()

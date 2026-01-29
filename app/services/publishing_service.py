@@ -28,108 +28,46 @@ async def publish_content(
     """
     results = []
     
-    # Determine media type if media exists
-    is_video = False
-    media_url = None
-    media_path = None
+    # Determine media types for all media
+    media_items = [] # List of {url: str, path: str, is_video: bool}
     
-    if local_media_paths and len(local_media_paths) > 0:
-        media_path = local_media_paths[0]
-        mime, _ = mimetypes.guess_type(media_path)
-        if mime and "video" in mime:
-            is_video = True
-    elif media_urls and len(media_urls) > 0:
-        media_url = media_urls[0]
-        # Heuristic check for URL extension if no local path
-        ext = media_url.split('?')[0].split('.')[-1].lower()
-        if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
-            is_video = True
-            
-    logger.info(f"Publishing Content (User {user.id}): Video={is_video}, Media={media_url or media_path}")
-
-    # =========================================================================
-    # MEDIA HANDLING: Download URLs to temp files if needed (e.g. for Twitter)
-    # =========================================================================
-    temp_files_to_cleanup = []
+    # Map by index since we have local_media_paths Corresponding to media_urls (usually)
+    # But local_media_paths might be populated from downloads of media_urls.
     
-    # If we have only URLs but might need local files (Twitter requires binary upload),
-    # download them to temporary paths.
-    if not local_media_paths and media_urls:
-        logger.info(f"No local paths provided. Processing {len(media_urls)} media files from URLs...")
-        local_media_paths = [] # Initialize if None
+    for i in range(max(len(media_urls), len(local_media_paths))):
+        u = media_urls[i] if i < len(media_urls) else None
+        p = local_media_paths[i] if i < len(local_media_paths) else None
         
-        try:
-            async with httpx.AsyncClient() as client:
-                for url in media_urls:
-                    try:
-                        # Check if it's a data URL (base64 encoded)
-                        data_url_match = re.match(r'^data:([^;]+);base64,(.+)$', url)
-                        
-                        if data_url_match:
-                            # It's a data URL - decode base64
-                            mime_type = data_url_match.group(1)
-                            base64_data = data_url_match.group(2)
-                            
-                            # Determine extension from MIME type
-                            ext_map = {
-                                'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
-                                'image/gif': 'gif', 'video/mp4': 'mp4', 'video/quicktime': 'mov'
-                            }
-                            ext = ext_map.get(mime_type, 'tmp')
-                            
-                            # Create temp file
-                            fd, path = tempfile.mkstemp(suffix=f".{ext}")
-                            os.close(fd)
-                            
-                            # Decode and write base64 data
-                            media_bytes = base64.b64decode(base64_data)
-                            with open(path, "wb") as f:
-                                f.write(media_bytes)
-                                
-                            logger.info(f"Successfully decoded data URL to {path}")
-                        else:
-                            # It's a regular URL - download via HTTP
-                            # Guess extension
-                            ext = url.split('?')[0].split('.')[-1].lower()
-                            if len(ext) > 4 or not ext: 
-                                ext = "tmp"
-                                
-                            # Create temp file
-                            fd, path = tempfile.mkstemp(suffix=f".{ext}")
-                            os.close(fd)
-                            
-                            # Download
-                            resp = await client.get(url, timeout=30.0)
-                            resp.raise_for_status()
-                            
-                            content_type = resp.headers.get("content-type", "")
-                            if "text/html" in content_type:
-                                logger.warning(f"Skipping URL {url} - identified as HTML")
-                                continue
-                                
-                            with open(path, "wb") as f:
-                                f.write(resp.content)
-                            
-                            logger.info(f"Successfully downloaded URL to {path}")
-                        
-                        local_media_paths.append(path)
-                        temp_files_to_cleanup.append(path)
-                        
-                    except Exception as dl_err:
-                        logger.error(f"Failed to process media: {dl_err}", exc_info=True)
-        except Exception as e:
-            logger.error(f"Error in media processing block: {e}", exc_info=True)
+        # Check if video
+        is_v = False
+        target_v = p or u
+        if target_v:
+            if p:
+                mime, _ = mimetypes.guess_type(p)
+                if mime and "video" in mime: is_v = True
+            elif u:
+                ext = u.split('?')[0].split('.')[-1].lower()
+                if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']: is_v = True
+        
+        media_items.append({"url": u, "path": p, "is_video": is_v})
+
+    is_video = any(item["is_video"] for item in media_items)
+    logger.info(f"Publishing Content (User {user.id}): Items={len(media_items)}, AnyVideo={is_video}")
+
+    # Extract first link from content for platforms that support it (if no media)
+    link_in_text = None
+    if content:
+        urls = re.findall(r'(https?://[^\s]+)', content)
+        if urls: link_in_text = urls[0]
 
     # =========================================================================
     # PUBLISHING LOOP
     # =========================================================================
     for target in accounts:
         platform = target.get('platform')
-        account_id = target.get('accountId') or target.get('account_id') # Support both naming
+        account_id = target.get('accountId') or target.get('account_id')
 
-        # Find the linked account in user model
         account = next((a for a in user.linked_accounts if a.platform == platform and a.account_id == account_id), None)
-        
         if not account:
             results.append({"platform": platform, "status": "failed", "error": "Account not linked"})
             continue
@@ -139,7 +77,7 @@ async def publish_content(
             
             # --- TWITTER ---
             if platform == "twitter":
-                # Check expiry
+                # Check expiry and refresh if needed
                 if account.expires_at and account.expires_at < datetime.datetime.utcnow():
                     if account.refresh_token_enc:
                         try:
@@ -161,8 +99,7 @@ async def publish_content(
                     else:
                         results.append({"platform": "twitter", "status": "failed", "error": "Token expired, no refresh token"})
                         continue
-                
-                # Upload Media
+
                 media_ids = []
                 if local_media_paths:
                     for path in local_media_paths:
@@ -177,23 +114,17 @@ async def publish_content(
                 
                 res = await twitter.post_tweet(token, content, media_ids=media_ids)
                 results.append({"platform": "twitter", "status": "success", "id": res.get("data", {}).get("id")})
-                
-                # Log Activity
-                await ActivityLog(
-                    userId=str(user.id),
-                    title="Posted to Twitter",
-                    platform="Twitter",
-                    type="success",
-                    meta={"postId": res.get("data", {}).get("id")}
-                ).insert()
+                await ActivityLog(userId=str(user.id), title="Posted to Twitter", platform="Twitter", type="success").insert()
 
             # --- INSTAGRAM ---
             elif platform == "instagram":
                 if not media_urls:
-                    results.append({"platform": "instagram", "status": "failed", "error": "Media URL required"})
+                    results.append({"platform": "instagram", "status": "failed", "error": "Media required for Instagram"})
                     continue
                 
-                if is_video:
+                if len(media_items) > 1:
+                    res = await instagram.publish_carousel(token, account_id, media_items, content)
+                elif is_video:
                     res = await instagram.publish_video(token, account_id, media_urls[0], content)
                 else:
                     res = await instagram.publish_image(token, account_id, media_urls[0], content)
@@ -205,35 +136,42 @@ async def publish_content(
             elif platform == "facebook":
                 if media_urls:
                     if is_video:
+                         # FB doesn't easily support multi-video in one post via API usually, 
+                         # so we post the first one or handle separately.
                          res = await facebook.post_video(token, account_id, content, media_urls[0])
                     else:
-                         res = await facebook.post_photo(token, account_id, content, media_urls[0])
+                         res = await facebook.post_photo(token, account_id, content, media_urls)
                 else:
-                    res = await facebook.post_to_page(token, account_id, content)
+                    res = await facebook.post_to_page(token, account_id, content, link=link_in_text)
                 
                 results.append({"platform": "facebook", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to Facebook", platform="Facebook", type="success").insert()
 
             # --- LINKEDIN ---
             elif platform == "linkedin":
-                if media_urls:
+                if media_items:
                     media_type_str = "video" if is_video else "image"
-                    reg_res = await linkedin.register_upload(token, account_id, media_type=media_type_str)
-                    upload_url = reg_res['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
-                    asset_urn = reg_res['value']['asset']
+                    asset_urns = []
                     
-                    image_data = None
-                    if local_media_paths:
-                        with open(local_media_paths[0], "rb") as f:
-                            image_data = f.read()
-                    elif media_urls:
-                        async with httpx.AsyncClient() as client:
-                            resp = await client.get(media_urls[0])
-                            image_data = resp.content
-                            
-                    if image_data:
-                        await linkedin.upload_asset(upload_url, image_data, token)
-                        res = await linkedin.post_with_media(token, account_id, content, asset_urn, media_type=media_type_str)
+                    for item in media_items:
+                        reg_res = await linkedin.register_upload(token, account_id, media_type=media_type_str)
+                        upload_url = reg_res['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
+                        asset_urn = reg_res['value']['asset']
+                        
+                        image_data = None
+                        if item["path"]:
+                            with open(item["path"], "rb") as f: image_data = f.read()
+                        elif item["url"]:
+                            async with httpx.AsyncClient() as client:
+                                resp = await client.get(item["url"])
+                                image_data = resp.content
+                        
+                        if image_data:
+                            await linkedin.upload_asset(upload_url, image_data, token)
+                            asset_urns.append(asset_urn)
+                    
+                    if asset_urns:
+                        res = await linkedin.post_with_media(token, account_id, content, asset_urns, media_type=media_type_str)
                     else:
                         res = await linkedin.post_to_profile(token, account_id, content)
                 else:
@@ -245,34 +183,18 @@ async def publish_content(
             # --- TIKTOK ---
             elif platform == "tiktok":
                 if not is_video or not media_urls:
-                    results.append({"platform": "tiktok", "status": "failed", "error": "TikTok requires a video file."})
+                    results.append({"platform": "tiktok", "status": "failed", "error": "TikTok requires a video."})
                     continue
-                    
-                # TikTok Post
-                # We need the direct URL for the module to read (since our module reads URL using httpx)
-                # Ensure media_urls[0] is accessible or logic in tiktok.py handles it
                 res = await tiktok.post_video(token, account_id, media_urls[0], content)
-                
                 results.append({"platform": "tiktok", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to TikTok", platform="TikTok", type="success").insert()
 
             # --- YOUTUBE ---
             elif platform == "youtube":
                 if not is_video or not local_media_paths:
-                    results.append({"platform": "youtube", "status": "failed", "error": "YouTube requires a video file."})
+                    results.append({"platform": "youtube", "status": "failed", "error": "YouTube requires a local video file."})
                     continue
-                
-                # Resumable upload usually needs a local file path
-                title = content[:100] if content else "New Video"
-                description = content
-                
-                res = await youtube.upload_video(
-                    token, 
-                    file_path=local_media_paths[0],
-                    title=title,
-                    description=description
-                )
-                
+                res = await youtube.upload_video(token, local_media_paths[0], content[:100], content)
                 results.append({"platform": "youtube", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to YouTube", platform="YouTube", type="success").insert()
 
@@ -282,69 +204,31 @@ async def publish_content(
                      results.append({"platform": "pinterest", "status": "failed", "error": "Pinterest requires an image."})
                      continue
                 
-                # We need a Board ID.
-                # Heuristic: 1. Check if accountId is numeric (Board ID) 
-                # 2. Else fetch boards and pick first.
                 board_id = account_id
                 boards = await pinterest.get_boards(token)
-                if boards:
-                     # If account_id matches one of the board IDs, good.
-                     # Else, if account_id is username, default to first board.
-                     # For robustness, just pick the first board's ID if we can't determine.
-                     # Real world: User should select board in UI.
-                     # Here we default to first board.
-                     board_id = boards[0]['id']
+                if boards: board_id = boards[0]['id']
                 
-                if not board_id:
-                     results.append({"platform": "pinterest", "status": "failed", "error": "No boards found to post to."})
-                     continue
-
-                res = await pinterest.create_pin(
-                    token, 
-                    board_id, 
-                    title=content[:100] if content else "New Pin", 
-                    description=content, 
-                    media_url=media_urls[0]
-                )
-                
+                res = await pinterest.create_pin(token, board_id, content[:100], content, link=link_in_text, media_url=media_urls[0])
                 results.append({"platform": "pinterest", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to Pinterest", platform="Pinterest", type="success").insert()
 
             # --- THREADS ---
             elif platform == "threads":
-                media_type = "VIDEO" if is_video else "IMAGE"
-                if not media_urls:
-                    # Threads supports text-only? Yes.
-                    # But post_thread signature I defined expects media_url optional.
-                    # Let's check my module... `post_thread(..., media_url=None)`
-                    pass
-
-                res = await threads.post_thread(
-                    token, 
-                    user_id=account_id, 
-                    text=content, 
-                    media_url=media_urls[0] if media_urls else None, 
-                    media_type=media_type
-                )
+                res = await threads.post_thread(token, account_id, content, media_urls=media_items)
                 results.append({"platform": "threads", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to Threads", platform="Threads", type="success").insert()
 
             # --- MASTODON ---
             elif platform == "mastodon":
-                # Need instance URL
                 instance_url = account.raw_profile.get("_instance_url")
-                if not instance_url:
-                    # Fallback: try to parse from username "user@instance.social"
-                    if "@" in account.username:
-                        parts = account.username.split("@")
-                        if len(parts) == 2:
-                             instance_url = "https://" + parts[1]
+                if not instance_url and "@" in account.username:
+                    parts = account.username.split("@")
+                    if len(parts) == 2: instance_url = "https://" + parts[1]
                 
                 if not instance_url:
                      results.append({"platform": "mastodon", "status": "failed", "error": "Instance URL not found."})
                      continue
                 
-                # Media Upload
                 media_ids = []
                 if local_media_paths:
                     for path in local_media_paths:
@@ -357,13 +241,18 @@ async def publish_content(
 
             # --- BLUESKY ---
             elif platform == "bluesky":
-                # Assuming simple text post for now as I implemented `create_record` 
-                # (My module didn't implement media upload for Bluesky yet, just text).
-                # Updates needed if media support desired.
+                embed = None
+                if local_media_paths:
+                    images = []
+                    for path in local_media_paths[:len(local_media_paths)]:
+                        with open(path, "rb") as f:
+                            img_data = f.read()
+                            blob = await bluesky.upload_blob(token, img_data)
+                            images.append({"image": blob, "alt": content[:100] if content else ""})
+                    if images:
+                        embed = {"$type": "app.bsky.embed.images", "images": images}
                 
-                user_did = account_id # stored as DID
-                res = await bluesky.create_record(token, user_did, content)
-                
+                res = await bluesky.create_record(token, account_id, content, embed=embed)
                 results.append({"platform": "bluesky", "status": "success", "id": res.get("uri")})
                 await ActivityLog(userId=str(user.id), title="Posted to Bluesky", platform="Bluesky", type="success").insert()
 

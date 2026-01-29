@@ -41,21 +41,43 @@ async def post_to_page(access_token: str, page_id: str, message: str, link: str 
         res.raise_for_status()
         return res.json()
 
-async def post_photo(access_token: str, page_id: str, message: str, image_url: str):
+async def post_photo(access_token: str, page_id: str, message: str, image_urls: list):
     """
-    Post a photo to a Facebook Page using an image URL.
+    Post one or more photos to a Facebook Page.
     """
     async with httpx.AsyncClient() as client:
-        params = {
-            "url": image_url,
-            "caption": message,
-            "access_token": access_token
-        }
-        
-        res = await client.post(
-            f"https://graph.facebook.com/v19.0/{page_id}/photos",
-            params=params
-        )
+        if len(image_urls) == 1:
+            # Single photo post
+            params = {
+                "url": image_urls[0],
+                "caption": message,
+                "access_token": access_token
+            }
+            res = await client.post(f"https://graph.facebook.com/v19.0/{page_id}/photos", params=params)
+        else:
+            # Multi-photo post
+            # 1. Upload each photo as unpublished (published=false)
+            media_fbid_list = []
+            for url in image_urls:
+                params = {
+                    "url": url,
+                    "published": "false",
+                    "access_token": access_token
+                }
+                upload_res = await client.post(f"https://graph.facebook.com/v19.0/{page_id}/photos", params=params)
+                upload_res.raise_for_status()
+                media_fbid_list.append(upload_res.json().get("id"))
+            
+            # 2. Create feed post with attached_media
+            attached_media = [{"media_fbid": fbid} for fbid in media_fbid_list]
+            import json
+            params = {
+                "message": message,
+                "attached_media": json.dumps(attached_media),
+                "access_token": access_token
+            }
+            res = await client.post(f"https://graph.facebook.com/v19.0/{page_id}/feed", params=params)
+            
         res.raise_for_status()
         return res.json()
 
