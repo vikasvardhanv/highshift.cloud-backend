@@ -28,24 +28,28 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
 import os
 
 async def publish_image(access_token: str, ig_user_id: str, image_url: str, caption: str, local_path: str = None):
+    """
+    Instagram Image Publishing.
+    NOTE: Instagram Graph API requires a PUBLICLY accessible URL for the image.
+    If local_path is provided, it must be hosted publicly first.
+    """
     async with httpx.AsyncClient() as client:
         # 1. Create container
-        params = {
-            "caption": caption,
-            "access_token": access_token
-        }
-        files = None
-        if local_path and os.path.exists(local_path):
-            files = {"image_url": open(local_path, "rb")}
-        else:
-            params["image_url"] = image_url
-
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
-            params=params if not files else {"access_token": access_token, "caption": caption},
-            files=files
+            params={
+                "image_url": image_url,
+                "caption": caption,
+                "access_token": access_token
+            }
         )
-        res.raise_for_status()
+        if res.status_code != 200:
+            error_data = res.json().get("error", {})
+            error_msg = error_data.get("message", "Unknown error")
+            if "not reach" in error_msg.lower() or "public url" in error_msg.lower():
+                raise Exception("Instagram requires a PUBLICLY accessible media URL. Local images cannot be uploaded directly.")
+            raise Exception(f"Instagram Container Error: {error_msg}")
+            
         container_id = res.json().get("id")
 
         # 2. Publish
@@ -57,27 +61,26 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         return pub_res.json()
 
 async def publish_video(access_token: str, ig_user_id: str, video_url: str, caption: str, local_path: str = None):
+    """
+    Instagram Video (Reels) Publishing.
+    NOTE: Instagram Graph API requires a PUBLICLY accessible URL for the video.
+    """
     async with httpx.AsyncClient() as client:
         # 1. Create container
-        params = {
-            "media_type": "VIDEO",
-            "caption": caption,
-            "access_token": access_token
-        }
-        files = None
-        if local_path and os.path.exists(local_path):
-            # Instagram requires video to be uploaded as 'video_url' normally, 
-            # but 'video_url' in multipart form is also supported for some endpoints.
-            files = {"video_url": open(local_path, "rb")}
-        else:
-            params["video_url"] = video_url
-
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
-            params=params if not files else {"access_token": access_token, "media_type": "VIDEO", "caption": caption},
-            files=files
+            params={
+                "media_type": "VIDEO",
+                "video_url": video_url,
+                "caption": caption,
+                "access_token": access_token
+            }
         )
-        res.raise_for_status()
+        if res.status_code != 200:
+            error_data = res.json().get("error", {})
+            error_msg = error_data.get("message", "Unknown error")
+            raise Exception(f"Instagram Video Container Error: {error_msg}")
+            
         container_id = res.json().get("id")
 
         # 2. Poll

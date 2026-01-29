@@ -1,4 +1,5 @@
 import httpx
+import os
 from app.utils.logger import logger
 
 async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: list):
