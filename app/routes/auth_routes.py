@@ -349,8 +349,8 @@ async def connect_platform(
         client_id = os.getenv("LINKEDIN_CLIENT_ID")
         redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
         # Default to minimal scopes if full ones fail, but try full ones first
-        default_scopes = "openid,profile,w_member_social"
-        full_scopes = "openid,profile,w_member_social,rw_organization_admin,w_organization_social"
+        default_scopes = "openid,profile,w_member_social,email"
+        full_scopes = "openid,profile,w_member_social,email"
         scopes = os.getenv("LINKEDIN_SCOPES", full_scopes).split(",")
         
         logger.info(f"LinkedIn Auth - ClientID: {client_id[:5]}... | RedirectURI: {redirect_uri}")
