@@ -77,7 +77,10 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
             params={"creation_id": container_id, "access_token": access_token}
         )
-        pub_res.raise_for_status()
+        if pub_res.status_code != 200:
+            error_data = pub_res.json().get("error", {})
+            error_msg = error_data.get("message", f"HTTP {pub_res.status_code}")
+            raise Exception(f"Instagram publish failed: {error_msg}")
         return pub_res.json()
 
 async def publish_video(access_token: str, ig_user_id: str, video_url: str, caption: str, local_path: str = None):

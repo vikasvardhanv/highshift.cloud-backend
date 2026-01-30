@@ -250,10 +250,15 @@ async def publish_content(
             
             # --- TIKTOK ---
             elif platform == "tiktok":
-                if not is_video or not media_urls:
+                if not is_video or not media_items:
                     results.append({"platform": "tiktok", "status": "failed", "error": "TikTok requires a video."})
                     continue
-                res = await tiktok.post_video(token, account_id, media_urls[0], content)
+                # Use the processed URL (MongoDB public URL) not the raw base64
+                video_url = media_items[0]["url"]
+                if not video_url or video_url.startswith("data:"):
+                    results.append({"platform": "tiktok", "status": "failed", "error": "TikTok requires a public video URL, not base64 data."})
+                    continue
+                res = await tiktok.post_video(token, account_id, video_url, content)
                 results.append({"platform": "tiktok", "status": "success", "id": res.get("id")})
                 await ActivityLog(userId=str(user.id), title="Posted to TikTok", platform="TikTok", type="success").insert()
 
