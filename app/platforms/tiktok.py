@@ -81,10 +81,12 @@ async def post_video(access_token: str, open_id: str, video_url: str, caption: s
     
     # 1. Init Upload
     async with httpx.AsyncClient() as client:
+        # NOTE: For unaudited/sandbox apps, privacy_level MUST be SELF_ONLY or FOLLOWER_OF_CREATOR
+        # PUBLIC_TO_EVERYONE only works for fully audited apps
         init_body = {
             "post_info": {
                 "title": caption,
-                "privacy_level": "PUBLIC_TO_EVERYONE",
+                "privacy_level": "SELF_ONLY",  # Required for sandbox/unaudited apps
                 "disable_duet": False,
                 "disable_comment": False,
                 "disable_stitch": False,
