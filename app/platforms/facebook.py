@@ -2,6 +2,15 @@ import httpx
 import os
 from app.utils.logger import logger
 
+def _extract_fb_error(res):
+    """Extract error message from Facebook Graph API response."""
+    try:
+        data = res.json()
+        error = data.get("error", {})
+        return error.get("message", str(data))
+    except:
+        return f"HTTP {res.status_code}"
+
 async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: list):
     params = {
         "client_id": client_id,
@@ -23,7 +32,8 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
                 "code": code
             }
         )
-        res.raise_for_status()
+        if res.status_code != 200:
+            raise Exception(f"Facebook token exchange failed: {_extract_fb_error(res)}")
         return res.json()
 
 async def post_to_page(access_token: str, page_id: str, message: str, link: str = None):
@@ -39,7 +49,8 @@ async def post_to_page(access_token: str, page_id: str, message: str, link: str 
             f"https://graph.facebook.com/v19.0/{page_id}/feed",
             params=params
         )
-        res.raise_for_status()
+        if res.status_code != 200:
+            raise Exception(f"Facebook post failed: {_extract_fb_error(res)}")
         return res.json()
 
 async def post_photo(access_token: str, page_id: str, message: str, image_urls: list, local_paths: list = None):
@@ -85,7 +96,8 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
                     params=params if not files else {"access_token": access_token, "published": "false"}, 
                     files=files
                 )
-                upload_res.raise_for_status()
+                if upload_res.status_code != 200:
+                    raise Exception(f"Facebook photo upload failed: {_extract_fb_error(upload_res)}")
                 media_fbid_list.append(upload_res.json().get("id"))
             
             # 2. Create feed post with attached_media
@@ -98,7 +110,8 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
             }
             res = await client.post(f"https://graph.facebook.com/v19.0/{page_id}/feed", params=params)
             
-        res.raise_for_status()
+        if res.status_code != 200:
+            raise Exception(f"Facebook photo post failed: {_extract_fb_error(res)}")
         return res.json()
 
 async def post_video(access_token: str, page_id: str, message: str, video_url: str, local_path: str = None):
@@ -123,7 +136,8 @@ async def post_video(access_token: str, page_id: str, message: str, video_url: s
             params=params if not files else {"access_token": access_token, "description": message},
             files=files
         )
-        res.raise_for_status()
+        if res.status_code != 200:
+            raise Exception(f"Facebook video post failed: {_extract_fb_error(res)}")
         return res.json()
 
 async def get_me(access_token: str):
@@ -135,7 +149,8 @@ async def get_me(access_token: str):
                 "access_token": access_token
             }
         )
-        res.raise_for_status()
+        if res.status_code != 200:
+            raise Exception(f"Facebook get_me failed: {_extract_fb_error(res)}")
         return res.json()
 
 async def get_accounts(access_token: str):
@@ -154,7 +169,8 @@ async def get_accounts(access_token: str):
             )
             
             logger.info(f"Facebook API Response Status: {res.status_code}")
-            res.raise_for_status()
+            if res.status_code != 200:
+                raise Exception(f"Facebook get_accounts failed: {_extract_fb_error(res)}")
             data = res.json()
             
             all_pages = data.get("data", [])
@@ -165,7 +181,9 @@ async def get_accounts(access_token: str):
                 try:
                     logger.info("Fetching next page of Facebook Accounts...")
                     res = await client.get(next_page)
-                    res.raise_for_status()
+                    if res.status_code != 200:
+                        logger.error(f"Facebook pagination error: {_extract_fb_error(res)}")
+                        break
                     data = res.json()
                     all_pages.extend(data.get("data", []))
                     next_page = data.get("paging", {}).get("next")
@@ -197,3 +215,4 @@ async def get_permissions(access_token: str):
             return []
         data = res.json()
         return data.get("data", [])
+
