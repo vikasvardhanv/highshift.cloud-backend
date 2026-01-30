@@ -207,7 +207,7 @@ async def upload_media(
 
 async def post_tweet(access_token: str, text: str, media_ids: list = None):
     async with httpx.AsyncClient() as client:
-        payload = {"text": text}
+        payload = {"text": text or ""} if not media_ids else {"text": text or ""}
         if media_ids:
             payload["media"] = {"media_ids": media_ids}
         
@@ -223,9 +223,19 @@ async def post_tweet(access_token: str, text: str, media_ids: list = None):
         )
         
         if res.status_code != 201:
-            logger.error(f"Twitter API error: {res.status_code} - {res.text}")
+            # Extract actual error from Twitter response
+            try:
+                error_data = res.json()
+                error_detail = error_data.get("detail", "")
+                errors = error_data.get("errors", [])
+                if errors:
+                    error_detail = errors[0].get("message", str(errors))
+                error_msg = error_detail or str(error_data)
+            except:
+                error_msg = res.text
+            logger.error(f"Twitter API error: {res.status_code} - {error_msg}")
+            raise Exception(f"Twitter post failed: {error_msg}")
         
-        res.raise_for_status()
         return res.json()
 
 async def get_me(access_token: str):
