@@ -874,7 +874,10 @@ async def oauth_callback(
             # 1. Exchange code
             try:
                 li_client_id = os.getenv("LINKEDIN_CLIENT_ID", "").strip()
-                li_client_secret = os.getenv("LINKEDIN_CLIENT_SECRET") or os.getenv("LINKEDIN_CLIENT_SECRET_PRIMARY")
+                # Get secret from either var and strip whitespace
+                secret_raw = os.getenv("LINKEDIN_CLIENT_SECRET") or os.getenv("LINKEDIN_CLIENT_SECRET_PRIMARY") or ""
+                li_client_secret = secret_raw.strip()
+                
                 if not li_client_secret:
                      logger.error("LinkedIn Client Secret is missing in env vars")
                 # Must match whatever was sent in Step 1 exactly
