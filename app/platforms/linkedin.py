@@ -143,7 +143,7 @@ async def post_with_media(access_token: str, author_urn: str, text: str, asset_u
                     "media": media_list
                 }
             },
-            "visibility": {"com.linkedin.MemberNetworkVisibility": "PUBLIC"}
+            "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"}
         }
         res = await client.post(
             "https://api.linkedin.com/v2/ugcPosts",
