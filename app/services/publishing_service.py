@@ -16,6 +16,97 @@ from app.platforms import instagram, twitter, facebook, linkedin, tiktok, youtub
 
 logger = logging.getLogger("publishing")
 
+# Platform content requirements
+PLATFORM_REQUIREMENTS = {
+    "twitter": {
+        "needs_content_or_media": True,
+        "max_text_length": 280,
+        "supports_images": True,
+        "supports_videos": True,
+        "error_msg": "Twitter requires either text (max 280 chars) or media (image/video)."
+    },
+    "instagram": {
+        "needs_media": True,
+        "supports_images": True,
+        "supports_videos": True,
+        "error_msg": "Instagram requires media (image or video). Text-only posts are not supported."
+    },
+    "facebook": {
+        "needs_content_or_media": True,
+        "max_text_length": 63206,
+        "supports_images": True,
+        "supports_videos": True,
+        "error_msg": "Facebook requires either text or media (image/video)."
+    },
+    "tiktok": {
+        "needs_video": True,
+        "supports_videos": True,
+        "error_msg": "TikTok only supports video content. Please upload a video."
+    },
+    "youtube": {
+        "needs_video": True,
+        "supports_videos": True,
+        "error_msg": "YouTube only supports video content. Please upload a video."
+    },
+    "linkedin": {
+        "needs_content_or_media": True,
+        "max_text_length": 3000,
+        "supports_images": True,
+        "supports_videos": True,
+        "error_msg": "LinkedIn requires either text (max 3000 chars) or media."
+    },
+    "pinterest": {
+        "needs_media": True,
+        "supports_images": True,
+        "supports_videos": True,
+        "error_msg": "Pinterest requires an image or video."
+    },
+    "threads": {
+        "needs_content_or_media": True,
+        "max_text_length": 500,
+        "supports_images": True,
+        "error_msg": "Threads requires either text (max 500 chars) or an image."
+    },
+    "bluesky": {
+        "needs_content_or_media": True,
+        "max_text_length": 300,
+        "supports_images": True,
+        "error_msg": "Bluesky requires either text (max 300 chars) or images."
+    },
+    "mastodon": {
+        "needs_content_or_media": True,
+        "max_text_length": 500,
+        "supports_images": True,
+        "supports_videos": True,
+        "error_msg": "Mastodon requires either text (max 500 chars) or media."
+    }
+}
+
+def validate_platform_content(platform: str, content: str, has_media: bool, is_video: bool) -> Optional[str]:
+    """Validate content meets platform requirements. Returns error message or None if valid."""
+    reqs = PLATFORM_REQUIREMENTS.get(platform, {})
+    
+    has_text = bool(content and content.strip())
+    
+    # Check if video is required
+    if reqs.get("needs_video") and (not has_media or not is_video):
+        return reqs.get("error_msg", f"{platform} requires a video.")
+    
+    # Check if media is required
+    if reqs.get("needs_media") and not has_media:
+        return reqs.get("error_msg", f"{platform} requires media.")
+    
+    # Check if content or media is required
+    if reqs.get("needs_content_or_media") and not has_text and not has_media:
+        return reqs.get("error_msg", f"{platform} requires either text or media.")
+    
+    # Check text length
+    max_len = reqs.get("max_text_length")
+    if max_len and has_text and len(content) > max_len:
+        return f"{platform.capitalize()} text exceeds {max_len} character limit ({len(content)} chars)."
+    
+    return None
+
 async def publish_content(
     user: User, 
     content: str, 
@@ -125,6 +216,14 @@ async def publish_content(
             
         try:
             token = decrypt_token(account.access_token_enc)
+            
+            # Validate content meets platform requirements
+            has_media = bool(media_items)
+            validation_error = validate_platform_content(platform, content, has_media, is_video)
+            if validation_error:
+                results.append({"platform": platform, "status": "failed", "error": validation_error})
+                continue
+            
             
             # --- TWITTER ---
             if platform == "twitter":
