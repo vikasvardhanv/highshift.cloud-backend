@@ -137,10 +137,21 @@ async def publish_content(
                             account.expires_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=new_tokens.get("expires_in", 7200))
                             await user.save()
                         except Exception as refresh_error:
-                            results.append({"platform": "twitter", "status": "failed", "error": f"Token refresh failed: {refresh_error}"})
+                            logger.error(f"Twitter token refresh failed: {refresh_error}")
+                            results.append({
+                                "platform": "twitter", 
+                                "status": "failed", 
+                                "error": "Your Twitter session has expired. Please reconnect Twitter from your dashboard.",
+                                "action_required": "reconnect"
+                            })
                             continue
                     else:
-                        results.append({"platform": "twitter", "status": "failed", "error": "Token expired, no refresh token"})
+                        results.append({
+                            "platform": "twitter", 
+                            "status": "failed", 
+                            "error": "Your Twitter session has expired. Please reconnect Twitter from your dashboard.",
+                            "action_required": "reconnect"
+                        })
                         continue
 
                 media_ids = []
