@@ -14,6 +14,8 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
     # LinkedIn scopes should be space-separated. URL encoding should use %20.
     scope_str = " ".join(scopes)
     
+    base_url = "https://www.linkedin.com/oauth/v2/authorization"
+    
     # Manual query string construction for ultimate precision
     query = f"response_type=code&client_id={client_id}&redirect_uri={urllib.parse.quote(redirect_uri)}&state={urllib.parse.quote(state)}&scope={urllib.parse.quote(scope_str)}"
     
