@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 
 from app.models.user import User
 from app.models.activity import ActivityLog
+from app.models.media import Media
 from app.services.token_service import decrypt_token, encrypt_token
 from app.platforms import instagram, twitter, facebook, linkedin, tiktok, youtube, pinterest, threads, bluesky, mastodon
 
@@ -41,23 +42,37 @@ async def publish_content(
             try:
                 # Extract mime type and base64 data
                 header, encoded = url.split(",", 1)
-                mime = header.split(";", 1)[0].split(":", 1)[1]
+                mime = header.split(";", 1)[0].split(":")[1]
                 ext = mimetypes.guess_extension(mime) or ".jpg"
                 
-                # Save to temporary file
+                # Save to temporary file (for platforms like Facebook that support direct upload)
                 fd, path = tempfile.mkstemp(suffix=ext)
                 with os.fdopen(fd, 'wb') as tmp:
                     tmp.write(base64.b64decode(encoded))
                 
                 processed_local_paths.append(path)
                 temp_files_to_cleanup.append(path)
-                processed_media_urls.append(None) # Can't use base64 as URL for most APIs
-                logger.info(f"Decoded base64 media to {path}")
+                
+                # Also save to MongoDB for public URL (needed by Instagram)
+                
+                media_doc = Media(
+                    user_id=str(user.id),
+                    filename=f"upload{ext}",
+                    content_type=mime,
+                    file_type="video" if "video" in mime else "image",
+                    data_url=url,
+                    size_bytes=len(base64.b64decode(encoded))
+                )
+                await media_doc.insert()
+                public_url = media_doc.get_public_url()
+                processed_media_urls.append(public_url)
+                logger.info(f"Saved base64 media to MongoDB: {media_doc.media_id} -> {public_url}")
+                
             except Exception as e:
-                logger.error(f"Failed to decode base64 media: {e}")
-                processed_media_urls.append(url) # Fallback (will likely fail later but safe)
+                logger.error(f"Failed to process base64 media: {e}")
+                processed_media_urls.append(None)
         elif url.startswith("blob:"):
-            return [{"platform": "all", "status": "failed", "error": "Media is still uploading or invalid (blob URL). Please wait a moment and try again."}]
+            return {"results": [{"platform": "all", "status": "failed", "error": "Media is still uploading or invalid (blob URL). Please wait a moment and try again."}]}
         else:
             processed_media_urls.append(url)
 
@@ -151,10 +166,11 @@ async def publish_content(
                     continue
                 
                 # Check for public URLs (Instagram requirement)
-                # If we have ONLY paths (common with base64 uploads from frontend), Instagram MUST fail
+                # With MongoDB storage, we now have public URLs for base64 uploads
                 if not any(item["url"] for item in media_items):
-                    results.append({"platform": "instagram", "status": "failed", "error": "Instagram requires a PUBLICLY accessible URL. Base64/Direct uploads are not supported by Instagram's API directly; media must be hosted on a public server first."})
+                    results.append({"platform": "instagram", "status": "failed", "error": "No public URL available for media. Please try uploading again."})
                     continue
+
 
                 if len(media_items) > 1:
                     res = await instagram.publish_carousel(token, account_id, media_items, content)

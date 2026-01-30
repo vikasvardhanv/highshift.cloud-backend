@@ -162,10 +162,11 @@ app.include_router(schedule_routes.router)
 app.include_router(history_routes.router)
 app.include_router(account_routes.router)
 app.include_router(activity_routes.router)
-from app.routes import legacy_routes, profile_routes
+from app.routes import legacy_routes, profile_routes, media_routes
 from app.routes.auth_routes import connect_router
 app.include_router(legacy_routes.router)
 app.include_router(profile_routes.router)
+app.include_router(media_routes.router)  # Media upload/serve for Instagram
 app.include_router(connect_router)  # Alias for /connect/{platform}/callback
 
 from fastapi.staticfiles import StaticFiles

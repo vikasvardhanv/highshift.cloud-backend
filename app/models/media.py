@@ -3,9 +3,11 @@ import uuid
 from typing import Optional
 from beanie import Document
 from pydantic import Field
+import os
 
 class Media(Document):
     """Stores uploaded media files in the database."""
+    media_id: str = Field(default_factory=lambda: uuid.uuid4().hex)  # Unique ID for public URL
     user_id: str = Field(alias="userId")
     filename: str
     content_type: str = Field(alias="contentType")  # e.g., "image/jpeg", "video/mp4"
@@ -27,9 +29,18 @@ class Media(Document):
         name = "media"
         indexes = [
             "userId",
-            "createdAt"
+            "createdAt",
+            "media_id"
         ]
     
     def get_display_url(self) -> str:
         """Return the best available URL for display."""
         return self.cloud_url or self.data_url or ""
+    
+    def get_public_url(self, base_url: str = None) -> str:
+        """Return a public URL that Instagram can fetch from."""
+        if self.cloud_url:
+            return self.cloud_url
+        # Serve from our own backend
+        backend_url = base_url or os.getenv("BACKEND_URL", "https://highshift-cloud-backend.vercel.app")
+        return f"{backend_url}/api/media/{self.media_id}"
