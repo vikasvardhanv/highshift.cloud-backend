@@ -380,7 +380,7 @@ async def connect_platform(
     if platform == "tiktok":
         client_key = os.getenv("TIKTOK_CLIENT_KEY")
         redirect_uri = os.getenv("TIKTOK_REDIRECT_URI")
-        scopes = os.getenv("TIKTOK_SCOPES", "user.info.basic,video.publish,video.upload").split(",")
+        scopes = os.getenv("TIKTOK_SCOPES", "user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload").split(",")
         
         if not client_key or not redirect_uri:
              missing = []
