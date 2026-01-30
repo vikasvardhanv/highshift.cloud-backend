@@ -906,10 +906,19 @@ async def oauth_callback(
             # 2. Get Profile info
             try:
                 profile_info = await linkedin.get_me(access_token)
-                organizations = await linkedin.get_organizations(access_token)
             except Exception as e:
                 logger.error(f"LinkedIn Profile Fetch Failed: {e}")
                 return RedirectResponse(f"{frontend_url}/auth/callback?error=LinkedIn Profile Fetch Failed: {str(e)}")
+
+            # 2.5 Get Organizations (Optional - depends on scopes)
+            organizations = []
+            try:
+                # Only attempt if we likely have scopes, or just try/catch
+                organizations = await linkedin.get_organizations(access_token)
+            except Exception as e:
+                logger.warning(f"LinkedIn Organization Fetch Failed (likely missing scopes): {e}")
+                # Continue without organizations
+                organizations = []
             
             entities = []
             if profile_info:
