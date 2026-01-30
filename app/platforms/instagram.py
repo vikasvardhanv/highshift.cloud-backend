@@ -53,7 +53,26 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
             
         container_id = res.json().get("id")
 
-        # 2. Publish
+        # 2. Wait for container to be ready (Instagram needs processing time)
+        import asyncio
+        max_retries = 10
+        for attempt in range(max_retries):
+            status_res = await client.get(
+                f"https://graph.facebook.com/v19.0/{container_id}",
+                params={"fields": "status_code,status", "access_token": access_token}
+            )
+            status_data = status_res.json()
+            status_code = status_data.get("status_code")
+            
+            if status_code == "FINISHED":
+                break
+            elif status_code == "ERROR":
+                raise Exception(f"Instagram container failed: {status_data.get('status')}")
+            
+            # Wait before retry
+            await asyncio.sleep(2)
+        
+        # 3. Publish
         pub_res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
             params={"creation_id": container_id, "access_token": access_token}
