@@ -11,11 +11,5 @@
             "src": "/(.*)",
             "dest": "main.py"
         }
-    ],
-    "crons": [
-        {
-            "path": "/cron/publish-scheduled",
-            "schedule": "* * * * *"
-        }
     ]
 }
