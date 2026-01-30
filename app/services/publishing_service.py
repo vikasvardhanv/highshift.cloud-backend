@@ -262,8 +262,10 @@ async def publish_content(
                         continue
 
                 media_ids = []
-                if local_media_paths:
-                    for path in local_media_paths:
+                # Use processed paths (includes temp files from base64 conversion)
+                paths_for_upload = [item["path"] for item in media_items if item.get("path")]
+                if paths_for_upload:
+                    for path in paths_for_upload:
                         media_id = await twitter.upload_media(
                             token, file_path=path,
                             api_key=os.getenv("TWITTER_API_KEY"),
