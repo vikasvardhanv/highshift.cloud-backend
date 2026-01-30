@@ -87,13 +87,14 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
     """
     Instagram Video (Reels) Publishing.
     NOTE: Instagram Graph API requires a PUBLICLY accessible URL for the video.
+    NOTE: media_type must be "REELS" not "VIDEO" for video uploads.
     """
-    async with httpx.AsyncClient() as client:
-        # 1. Create container
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # 1. Create container - use REELS for video content
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
             params={
-                "media_type": "VIDEO",
+                "media_type": "REELS",  # Must be REELS, not VIDEO
                 "video_url": video_url,
                 "caption": caption,
                 "access_token": access_token
