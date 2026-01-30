@@ -37,6 +37,9 @@ async def publish_content(
     processed_media_urls = []
     processed_local_paths = list(local_media_paths) if local_media_paths else []
 
+    # Track video status alongside URLs
+    processed_media_types = []  # Parallel list: True if video, False if image
+    
     for url in media_urls:
         if url.startswith("data:"):
             try:
@@ -44,6 +47,7 @@ async def publish_content(
                 header, encoded = url.split(",", 1)
                 mime = header.split(";", 1)[0].split(":")[1]
                 ext = mimetypes.guess_extension(mime) or ".jpg"
+                is_vid = "video" in mime
                 
                 # Save to temporary file (for platforms like Facebook that support direct upload)
                 fd, path = tempfile.mkstemp(suffix=ext)
@@ -53,44 +57,48 @@ async def publish_content(
                 processed_local_paths.append(path)
                 temp_files_to_cleanup.append(path)
                 
-                # Also save to MongoDB for public URL (needed by Instagram)
-                
+                # Also save to MongoDB for public URL (needed by Instagram, TikTok)
                 media_doc = Media(
                     user_id=str(user.id),
                     filename=f"upload{ext}",
                     content_type=mime,
-                    file_type="video" if "video" in mime else "image",
+                    file_type="video" if is_vid else "image",
                     data_url=url,
                     size_bytes=len(base64.b64decode(encoded))
                 )
                 await media_doc.insert()
                 public_url = media_doc.get_public_url()
                 processed_media_urls.append(public_url)
-                logger.info(f"Saved base64 media to MongoDB: {media_doc.media_id} -> {public_url}")
+                processed_media_types.append(is_vid)
+                logger.info(f"Saved base64 media to MongoDB: {media_doc.media_id} -> {public_url} (video={is_vid})")
                 
             except Exception as e:
                 logger.error(f"Failed to process base64 media: {e}")
                 processed_media_urls.append(None)
+                processed_media_types.append(False)
         elif url.startswith("blob:"):
             return {"results": [{"platform": "all", "status": "failed", "error": "Media is still uploading or invalid (blob URL). Please wait a moment and try again."}]}
         else:
             processed_media_urls.append(url)
+            # Check extension for non-base64 URLs
+            ext = url.split('?')[0].split('.')[-1].lower()
+            processed_media_types.append(ext in ['mp4', 'mov', 'avi', 'mkv', 'webm'])
 
     # Re-align media items based on processed inputs
     for i in range(max(len(processed_media_urls), len(processed_local_paths))):
         u = processed_media_urls[i] if i < len(processed_media_urls) else None
         p = processed_local_paths[i] if i < len(processed_local_paths) else None
         
-        # Check if video
+        # Check if video - use tracked type if available, otherwise guess from path/url
         is_v = False
-        target_v = p or u
-        if target_v:
-            if p:
-                mime, _ = mimetypes.guess_type(p)
-                if mime and "video" in mime: is_v = True
-            elif u:
-                ext = u.split('?')[0].split('.')[-1].lower()
-                if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']: is_v = True
+        if i < len(processed_media_types):
+            is_v = processed_media_types[i]
+        elif p:
+            mime, _ = mimetypes.guess_type(p)
+            if mime and "video" in mime: is_v = True
+        elif u:
+            ext = u.split('?')[0].split('.')[-1].lower()
+            if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']: is_v = True
         
         media_items.append({"url": u, "path": p, "is_video": is_v})
 
