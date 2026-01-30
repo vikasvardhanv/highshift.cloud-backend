@@ -106,8 +106,8 @@ async def get_schedule_calendar(
     Returns scheduled posts grouped by date for calendar display.
     """
     print(f"DEBUG: Fetching calendar for user {user.id}")
-    # Fix Query and Sort
-    posts = await ScheduledPost.find({"userId.$id": user.id}).sort("scheduledFor").to_list()
+    # Use Beanie's native query syntax for Links
+    posts = await ScheduledPost.find(ScheduledPost.user_id.id == user.id).sort(ScheduledPost.scheduled_for).to_list()
     print(f"DEBUG: Found {len(posts)} posts for calendar")
     
     # Return flat list, let frontend handle grouping by local timezone

@@ -19,7 +19,7 @@ async def get_recent_activity(
     Fetch recent activity logs for the user.
     """
     logs = await ActivityLog.find(
-        ActivityLog.user_id == user.id
+        ActivityLog.user_id.id == user.id
     ).sort("-time").limit(limit).to_list()
     
     return {"activity": logs}
