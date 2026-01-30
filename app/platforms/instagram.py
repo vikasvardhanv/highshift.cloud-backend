@@ -33,29 +33,39 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
     NOTE: Instagram Graph API requires a PUBLICLY accessible URL for the image.
     If local_path is provided, it must be hosted publicly first.
     """
-    async with httpx.AsyncClient() as client:
+    import asyncio
+    import logging
+    logger = logging.getLogger("instagram")
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
         # 1. Create container
+        logger.info(f"Instagram: Creating container for image_url={image_url[:100]}...")
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
             params={
                 "image_url": image_url,
-                "media_type": "IMAGE",
-                "caption": caption,
+                "caption": caption or "",
                 "access_token": access_token
             }
         )
+        res_json = res.json()
+        logger.info(f"Instagram: Container response: {res.status_code} - {res_json}")
+        
         if res.status_code != 200:
-            error_data = res.json().get("error", {})
-            error_msg = error_data.get("message", "Unknown error")
+            error_data = res_json.get("error", {})
+            error_msg = error_data.get("message", str(res_json))
             if "not reach" in error_msg.lower() or "public url" in error_msg.lower():
                 raise Exception("Instagram requires a PUBLICLY accessible media URL. Local images cannot be uploaded directly.")
             raise Exception(f"Instagram Container Error: {error_msg}")
             
-        container_id = res.json().get("id")
+        container_id = res_json.get("id")
+        if not container_id:
+            raise Exception(f"Instagram: No container ID returned: {res_json}")
 
         # 2. Wait for container to be ready (Instagram needs processing time)
-        import asyncio
+        logger.info(f"Instagram: Waiting for container {container_id} to be ready...")
         max_retries = 10
+        last_status = None
         for attempt in range(max_retries):
             status_res = await client.get(
                 f"https://graph.facebook.com/v19.0/{container_id}",
@@ -63,25 +73,35 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
             )
             status_data = status_res.json()
             status_code = status_data.get("status_code")
+            last_status = status_code
+            logger.info(f"Instagram: Container status (attempt {attempt+1}): {status_code}")
             
             if status_code == "FINISHED":
                 break
             elif status_code == "ERROR":
-                raise Exception(f"Instagram container failed: {status_data.get('status')}")
+                raise Exception(f"Instagram container failed: {status_data.get('status', 'Unknown error')}")
             
             # Wait before retry
             await asyncio.sleep(2)
+        else:
+            # Loop completed without break - container never became ready
+            raise Exception(f"Instagram: Container timeout - final status was: {last_status}")
         
         # 3. Publish
+        logger.info(f"Instagram: Publishing container {container_id}...")
         pub_res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
             params={"creation_id": container_id, "access_token": access_token}
         )
+        pub_json = pub_res.json()
+        logger.info(f"Instagram: Publish response: {pub_res.status_code} - {pub_json}")
+        
         if pub_res.status_code != 200:
-            error_data = pub_res.json().get("error", {})
-            error_msg = error_data.get("message", f"HTTP {pub_res.status_code}")
+            error_data = pub_json.get("error", {})
+            error_msg = error_data.get("message", str(pub_json))
             raise Exception(f"Instagram publish failed: {error_msg}")
-        return pub_res.json()
+        return pub_json
+
 
 async def publish_video(access_token: str, ig_user_id: str, video_url: str, caption: str, local_path: str = None):
     """
