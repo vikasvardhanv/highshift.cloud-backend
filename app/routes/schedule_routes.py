@@ -68,7 +68,7 @@ async def create_schedule(
     # Log activity
     from app.models.activity import ActivityLog
     await ActivityLog(
-        userId=str(user.id),
+        user_id=user,
         title=f"Scheduled a post for {post.scheduled_for.strftime('%Y-%m-%d %H:%M')}",
         type="success",
         platform="System",
