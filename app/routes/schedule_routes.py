@@ -64,6 +64,16 @@ async def create_schedule(
     )
     await post.insert()
     print(f"DEBUG: Scheduled Post Created with ID: {post.id} for User {user.id}")
+
+    # Log activity
+    from app.models.activity import ActivityLog
+    await ActivityLog(
+        userId=str(user.id),
+        title=f"Scheduled a post for {post.scheduled_for.strftime('%Y-%m-%d %H:%M')}",
+        type="success",
+        platform="System",
+        meta={"postId": str(post.id)}
+    ).insert()
     
     return {"success": True, "post": post}
 
