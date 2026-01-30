@@ -349,8 +349,8 @@ async def connect_platform(
 
     if platform == "linkedin":
         client_id = os.getenv("LINKEDIN_CLIENT_ID")
-        # Try using the /connect/ path variant which worked for YouTube
-        redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", "").replace("/auth/", "/connect/")
+        # Use the exact URI from env, do not modify
+        redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
         
         scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social,email").split(",")
         
