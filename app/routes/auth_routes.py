@@ -874,9 +874,9 @@ async def oauth_callback(
             # 1. Exchange code
             try:
                 li_client_id = os.getenv("LINKEDIN_CLIENT_ID", "").strip()
-                li_client_secret = os.getenv("LINKEDIN_CLIENT_SECRET", "").strip()
+                li_client_secret = os.getenv("LINKEDIN_CLIENT_SECRET_PRIMARY", "").strip()
                 # Must match whatever was sent in Step 1 exactly
-                li_redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", "").replace("/auth/", "/connect/").strip()
+                li_redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", "").strip()
                 
                 logger.info(f"LinkedIn Token Exchange - ClientID: {li_client_id} | Redirect: {li_redirect_uri}")
                 
