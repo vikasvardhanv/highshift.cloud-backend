@@ -966,6 +966,9 @@ async def oauth_callback(
                 new_user = True
             
             # 4. Link Accounts
+            updates_made = False
+            limit_reached = False
+
             for entity in entities:
                 account_id = entity["id"]
                 display_name = entity["name"]
@@ -975,6 +978,7 @@ async def oauth_callback(
                 
                 if not current_account and len(user.linked_accounts) >= user.max_profiles:
                     # Skip if limit reached
+                    limit_reached = True
                     continue
 
                 linked_account = LinkedAccount(
@@ -992,6 +996,10 @@ async def oauth_callback(
                 # Remove old version if exists, then add new
                 user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "linkedin" and a.account_id == account_id)]
                 user.linked_accounts.append(linked_account)
+                updates_made = True
+            
+            if not updates_made and limit_reached:
+                 return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached: Max {user.max_profiles} profiles allow.")
             
             if new_user:
                 await user.insert()

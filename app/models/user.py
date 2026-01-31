@@ -45,7 +45,7 @@ class User(Document):
     
     # B2B / Limits
     plan_tier: str = Field(default="starter", alias="planTier")
-    max_profiles: int = Field(default=5, alias="maxProfiles")
+    max_profiles: int = Field(default=50, alias="maxProfiles")
 
     # New Auth Fields
     email: Optional[str] = Field(None, unique=True)
