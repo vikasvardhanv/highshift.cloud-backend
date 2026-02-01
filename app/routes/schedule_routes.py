@@ -45,6 +45,9 @@ async def create_schedule(
     try:
         # Handle potential Z suffix or offset
         dt = datetime.datetime.fromisoformat(scheduled_time_str.replace("Z", "+00:00"))
+        # Ensure it is timezone aware, if naive assume UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
         print(f"DEBUG: Parsed datetime: {dt}")
     except ValueError as e:
         print(f"DEBUG: Date parse error: {e}")

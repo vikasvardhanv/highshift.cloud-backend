@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.scheduled_post import ScheduledPost
 from app.models.user import User
 from app.models.activity import ActivityLog
@@ -40,7 +40,7 @@ class BackgroundScheduler:
         """
         Finds pending posts that are due and publishes them.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         # Find posts that are pending and scheduled time is passed
         due_posts = await ScheduledPost.find(
             ScheduledPost.status == "pending",
