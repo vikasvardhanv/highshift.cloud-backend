@@ -54,7 +54,20 @@ async def test_scheduler():
     else:
         print("FAILURE: Post matches criteria but was not picked up.")
 
-    # 5. Cleanup
+    # 5. Verify Retrieval (GET /schedule logic)
+    print("Testing GET /schedule query logic...")
+    from bson import ObjectId
+    # Updated matching logic from checks
+    posts_list = await ScheduledPost.find({"userId.$id": ObjectId(user.id)}).sort("-scheduled_for").to_list()
+    print(f"Found {len(posts_list)} posts for user {user.id}")
+    
+    found_our_post = any(str(p.id) == str(post.id) for p in posts_list)
+    if found_our_post:
+        print("SUCCESS: GET Query found the test post.")
+    else:
+        print("FAILURE: GET Query did NOT find the test post. Query syntax might be wrong.")
+
+    # 6. Cleanup
     await updated_post.delete()
     print("Test post deleted.")
 

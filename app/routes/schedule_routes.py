@@ -16,9 +16,10 @@ router = APIRouter(prefix="/schedule", tags=["Schedule"], dependencies=[Depends(
 async def get_schedule(
     user: User = Depends(get_current_user)
 ):
+    from bson import ObjectId
     print(f"DEBUG: Fetching schedule for user {user.id}")
-    # Fix: Use Beanie's safe query syntax for Links and Sort
-    posts = await ScheduledPost.find(ScheduledPost.user_id.id == user.id).sort(-ScheduledPost.scheduled_for).to_list()
+    # Fix: Use raw MongoDB query with explicit ObjectId casting for DBRef
+    posts = await ScheduledPost.find({"userId.$id": ObjectId(user.id)}).sort("-scheduled_for").to_list()
     print(f"DEBUG: Found {len(posts)} posts for list view")
     return {"posts": posts}
 
@@ -107,9 +108,10 @@ async def get_schedule_calendar(
     """
     Returns scheduled posts grouped by date for calendar display.
     """
+    from bson import ObjectId
     print(f"DEBUG: Fetching calendar for user {user.id}")
-    # Use Beanie's native query syntax for Links
-    posts = await ScheduledPost.find(ScheduledPost.user_id.id == user.id).sort(ScheduledPost.scheduled_for).to_list()
+    # Fix: Use raw MongoDB query with explicit ObjectId casting
+    posts = await ScheduledPost.find({"userId.$id": ObjectId(user.id)}).sort("scheduled_for").to_list()
     print(f"DEBUG: Found {len(posts)} posts for calendar")
     
     # Return flat list, let frontend handle grouping by local timezone
