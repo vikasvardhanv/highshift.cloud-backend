@@ -17,9 +17,8 @@ async def get_schedule(
     user: User = Depends(get_current_user)
 ):
     print(f"DEBUG: Fetching schedule for user {user.id}")
-    # Fix: User ID is stored as DBRef, so we query userId.$id. 
-    # Also use alias 'scheduledFor' for sorting.
-    posts = await ScheduledPost.find({"userId.$id": user.id}).sort("-scheduledFor").to_list()
+    # Fix: Use Beanie's safe query syntax for Links and Sort
+    posts = await ScheduledPost.find(ScheduledPost.user_id.id == user.id).sort(-ScheduledPost.scheduled_for).to_list()
     print(f"DEBUG: Found {len(posts)} posts for list view")
     return {"posts": posts}
 
