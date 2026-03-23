@@ -10,4 +10,4 @@ logging.basicConfig(
     ]
 )
 
-logger = logging.getLogger("highshift")
+logger = logging.getLogger("socialraven")

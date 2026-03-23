@@ -8,7 +8,7 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
     redirect_uri = redirect_uri.strip()
     
     # Force HTTPS for production redirects to avoid LinkedIn mismatch issues
-    if "highshift.cloud" in redirect_uri and redirect_uri.startswith("http://"):
+    if "socialraven.meganai.cloud" in redirect_uri and redirect_uri.startswith("http://"):
         redirect_uri = redirect_uri.replace("http://", "https://")
 
     # LinkedIn scopes should be space-separated. URL encoding should use %20.

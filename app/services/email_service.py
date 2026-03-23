@@ -48,7 +48,7 @@ def send_password_reset_email(to_email: str, reset_link: str):
     """
     Send password reset email with the link.
     """
-    subject = "Reset Your Password - HighShift"
+    subject = "Reset Your Password - Social Raven"
     
     html_content = f"""
     <html>
@@ -56,7 +56,7 @@ def send_password_reset_email(to_email: str, reset_link: str):
             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
                 <h2 style="color: #4f46e5;">Reset Your Password</h2>
                 <p>Hello,</p>
-                <p>We received a request to reset your password for your HighShift account. If you didn't make this request, you can safely ignore this email.</p>
+                <p>We received a request to reset your password for your Social Raven account. If you didn't make this request, you can safely ignore this email.</p>
                 <p>To reset your password, click the button below:</p>
                 <div style="text-align: center; margin: 30px 0;">
                     <a href="{reset_link}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Reset Password</a>
@@ -65,7 +65,7 @@ def send_password_reset_email(to_email: str, reset_link: str):
                 <p><a href="{reset_link}">{reset_link}</a></p>
                 <p>This link will expire in 30 minutes.</p>
                 <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-                <p style="font-size: 12px; color: #666;">HighShift Media Team</p>
+                <p style="font-size: 12px; color: #666;">Social Raven Media Team</p>
             </div>
         </body>
     </html>

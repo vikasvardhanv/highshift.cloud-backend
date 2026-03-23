@@ -195,7 +195,7 @@ async def google_callback(code: str, state: str):
         frontend_url = origins[0] if origins and origins[0] else "http://localhost:5173"
 
     # Fix: If production and 'http' is found in CORS_ORIGINS but not localhost, force HTTPS
-    if "highshift.cloud" in frontend_url and frontend_url.startswith("http://"):
+    if "socialraven.meganai.cloud" in frontend_url and frontend_url.startswith("http://"):
         frontend_url = frontend_url.replace("http://", "https://")
 
 
@@ -434,7 +434,7 @@ async def connect_platform(
         try:
             app_data = await mastodon.get_app_credentials(
                 instance_url, 
-                "HighShift", 
+                "Social Raven", 
                 redirect_uri, 
                 os.getenv("FRONTEND_URL")
             )
@@ -539,7 +539,7 @@ async def oauth_callback(
         frontend_url = origins[0] if origins and origins[0] else "http://localhost:5173"
 
     # Fix: If production and 'http' is found in CORS_ORIGINS but not localhost, force HTTPS
-    if "highshift.cloud" in frontend_url and frontend_url.startswith("http://"):
+    if "socialraven.meganai.cloud" in frontend_url and frontend_url.startswith("http://"):
         frontend_url = frontend_url.replace("http://", "https://")
 
 

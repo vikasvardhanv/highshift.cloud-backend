@@ -48,8 +48,8 @@ async def ensure_beanie_initialized():
         try:
             db = client.get_default_database()
         except Exception:
-            # If no default db in URI (raises ConfigurationError), use 'highshift'
-            db = client["highshift"]
+            # If no default db in URI (raises ConfigurationError), use 'socialraven'
+            db = client["socialraven"]
         
         await init_beanie(
             database=db,
@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
     # Shutdown logic
     scheduler.stop()
 
-app = FastAPI(title="HighShift AI Backend", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Social Raven AI Backend", version="1.0.0", lifespan=lifespan)
 
 # CORS configuration
 # Priority: Get from env, but handle the case where env is empty or just "*"
@@ -90,9 +90,9 @@ origins = [o.strip() for o in env_origins if o.strip()]
 
 # Explicitly add production and common dev domains
 production_domains = [
-    "https://highshift.cloud", 
-    "https://www.highshift.cloud",
-    "https://highshift-cloud.vercel.app"
+    "https://socialraven.meganai.cloud", 
+    "https://www.socialraven.meganai.cloud",
+    "https://socialraven.meganai.cloud.vercel.app"
 ]
 for d in production_domains:
     if d not in origins:
@@ -201,14 +201,14 @@ async def health_check():
         
     return {
         "status": "ok" if "error" not in db_status else "degraded", 
-        "message": "HighShift Cloud Backend is running",
+        "message": "Social Raven Cloud Backend is running",
         "database": db_status,
         "initialized": db_initialized
     }
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to HighShift Cloud API (Python/FastAPI)"}
+    return {"message": "Welcome to Social Raven Cloud API (Python/FastAPI)"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,6 +1,6 @@
-# HighShift: AI-Powered Social Media Management System (Backend)
+# Social Raven: AI-Powered Social Media Management System (Backend)
 
-HighShift is a comprehensive social media management platform that combines the power of multi-channel posting, advanced analytics, and AI-driven content generation.
+Social Raven is a comprehensive social media management platform that combines the power of multi-channel posting, advanced analytics, and AI-driven content generation.
 
 This repository contains the **Python (FastAPI)** backend.
 
@@ -12,7 +12,7 @@ This repository contains the **Python (FastAPI)** backend.
 
 ## 🛠 Project Structure
 ```
-highshift.cloud-backend/
+socialraven.meganai.cloud-backend/
 ├── app/
 │   ├── models/         # Beanie models (MongoDB)
 │   ├── routes/         # FastAPI routers (AI, Analytics, Auth)
@@ -33,7 +33,7 @@ highshift.cloud-backend/
 ```bash
 # Clone the repository
 git clone [repo-url]
-cd highshift.cloud-backend
+cd socialraven.meganai.cloud-backend
 
 # Install dependencies
 pip install -r requirements.txt

@@ -42,5 +42,5 @@ class Media(Document):
         if self.cloud_url:
             return self.cloud_url
         # Serve from our own backend
-        backend_url = base_url or os.getenv("BACKEND_URL", "https://highshift-cloud-backend.vercel.app")
+        backend_url = base_url or os.getenv("BACKEND_URL", "https://socialraven.meganai.cloud-backend.vercel.app")
         return f"{backend_url}/api/media/{self.media_id}"

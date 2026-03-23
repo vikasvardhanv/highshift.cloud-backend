@@ -105,7 +105,7 @@ async def get_recent_activity(user: User):
     # Add some mock activity if empty
     if not activity:
         activity = [
-            {"id": "m1", "type": "system", "title": "Welcome to HighShift", "description": "System • Account created", "time": datetime.utcnow().isoformat(), "icon": "Zap"}
+            {"id": "m1", "type": "system", "title": "Welcome to Social Raven", "description": "System • Account created", "time": datetime.utcnow().isoformat(), "icon": "Zap"}
         ]
         
     return activity

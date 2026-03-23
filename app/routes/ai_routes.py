@@ -12,6 +12,12 @@ class GenerateRequest(BaseModel):
     platform: str = "all"
     tone: Optional[str] = None
 
+class InstantPublishRequest(BaseModel):
+    email: str
+    postTopic: str
+    targetAudience: str
+    date: str
+
 @router.post("/generate")
 async def generate_ai_post(req: GenerateRequest, user: User = Depends(get_current_user)):
     result = await generate_post_content(
@@ -19,5 +25,16 @@ async def generate_ai_post(req: GenerateRequest, user: User = Depends(get_curren
         topic=req.topic,
         platform=req.platform,
         tone=req.tone
+    )
+    return result
+
+@router.post("/instant-publish")
+async def instant_publish(req: InstantPublishRequest, user: User = Depends(get_current_user)):
+    from app.services.ai_service import trigger_instant_publish
+    result = await trigger_instant_publish(
+        email=req.email,
+        topic=req.postTopic,
+        audience=req.targetAudience,
+        date=req.date
     )
     return result

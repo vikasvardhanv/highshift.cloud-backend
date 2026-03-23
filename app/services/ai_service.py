@@ -11,6 +11,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROK_API_KEY = os.getenv("GROK_API_KEY")
 
 PROVIDER = "gemini" if GEMINI_API_KEY else ("grok" if GROK_API_KEY else "none")
+N8N_INSTANT_WEBHOOK_URL = os.getenv("N8N_INSTANT_WEBHOOK_URL", "https://wfig.app.n8n.cloud/webhook/1e3df4e4-a0fd-453e-9942-63ee710aeded")
 
 # Initialize Clients
 if GEMINI_API_KEY:
@@ -196,4 +197,34 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
             "content": f"Failed to generate content: {str(e)}",
             "error": str(e),
             "model": "fallback"
+        }
+
+async def trigger_instant_publish(email: str, topic: str, audience: str, date: str):
+    """
+    Triggers the n8n Social Media Automation workflow.
+    """
+    import httpx
+    payload = {
+        "Email": email,
+        "Post Topic": topic,
+        "Target Audience": audience,
+        "Date": date
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(N8N_INSTANT_WEBHOOK_URL, json=payload)
+            response.raise_for_status()
+            
+            # Since it's a form trigger/webhook, it might return a success message or JSON
+            return {
+                "status": "success",
+                "message": "Instant publish workflow triggered successfully.",
+                "n8n_response": response.text[:200]
+            }
+    except Exception as e:
+        logger.error(f"N8N Trigger failed: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to trigger automation: {str(e)}"
         }
