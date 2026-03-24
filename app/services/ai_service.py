@@ -11,7 +11,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROK_API_KEY = os.getenv("GROK_API_KEY")
 
 PROVIDER = "gemini" if GEMINI_API_KEY else ("grok" if GROK_API_KEY else "none")
-N8N_INSTANT_WEBHOOK_URL = os.getenv("N8N_INSTANT_WEBHOOK_URL", "https://wfig.app.n8n.cloud/webhook/1e3df4e4-a0fd-453e-9942-63ee710aeded")
+N8N_INSTANT_WEBHOOK_URL = os.getenv("N8N_INSTANT_WEBHOOK_URL", "https://wfig.app.n8n.cloud/form/1e3df4e4-a0fd-453e-9942-63ee710aeded")
 
 # Initialize Clients
 if GEMINI_API_KEY:
@@ -224,7 +224,9 @@ async def trigger_instant_publish(
     
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(N8N_INSTANT_WEBHOOK_URL, json=payload)
+            # For n8n formTrigger, sending as standard Form Data is often more reliable
+            # than JSON, as the node mimics a browser form submission.
+            response = await client.post(N8N_INSTANT_WEBHOOK_URL, data=payload)
             response.raise_for_status()
             
             # Since it's a form trigger/webhook, it might return a success message or JSON
