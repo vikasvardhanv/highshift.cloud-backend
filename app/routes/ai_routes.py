@@ -17,6 +17,12 @@ class InstantPublishRequest(BaseModel):
     postTopic: str
     targetAudience: str
     date: str
+    system: Optional[str] = "social_raven"
+    apiKey: Optional[str] = None
+    instagram: Optional[str] = None
+    facebook: Optional[str] = None
+    twitter: Optional[str] = None
+    linkedin: Optional[str] = None
 
 @router.post("/generate")
 async def generate_ai_post(req: GenerateRequest, user: User = Depends(get_current_user)):
@@ -35,6 +41,12 @@ async def instant_publish(req: InstantPublishRequest, user: User = Depends(get_c
         email=req.email,
         topic=req.postTopic,
         audience=req.targetAudience,
-        date=req.date
+        date=req.date,
+        system=req.system,
+        api_key=req.apiKey,
+        instagram=req.instagram,
+        facebook=req.facebook,
+        twitter=req.twitter,
+        linkedin=req.linkedin
     )
     return result

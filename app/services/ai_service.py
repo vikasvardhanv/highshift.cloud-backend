@@ -199,7 +199,12 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
             "model": "fallback"
         }
 
-async def trigger_instant_publish(email: str, topic: str, audience: str, date: str):
+async def trigger_instant_publish(
+    email: str, topic: str, audience: str, date: str, 
+    system: Optional[str] = "social_raven", api_key: Optional[str] = None,
+    instagram: Optional[str] = None, facebook: Optional[str] = None,
+    twitter: Optional[str] = None, linkedin: Optional[str] = None
+):
     """
     Triggers the n8n Social Media Automation workflow.
     """
@@ -208,7 +213,13 @@ async def trigger_instant_publish(email: str, topic: str, audience: str, date: s
         "Email": email,
         "Post Topic": topic,
         "Target Audience": audience,
-        "Date": date
+        "Date": date,
+        "System": system,
+        "ApiKey": api_key,
+        "Instagram": instagram,
+        "Facebook": facebook,
+        "Twitter": twitter,
+        "Linkedin": linkedin
     }
     
     try:
