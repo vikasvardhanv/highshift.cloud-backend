@@ -60,3 +60,17 @@ async def delete_key(
         
     await user.save()
     return {"success": True, "remaining": len(user.api_keys)}
+
+@router.get("/developer")
+async def get_developer_keys(user: User = Depends(get_current_user)):
+    return {"developer_keys": user.developer_keys or {}}
+
+@router.post("/developer")
+async def update_developer_keys(
+    payload: dict = Body(...),
+    user: User = Depends(get_current_user)
+):
+    # Only allow specific keys for now or flexible
+    user.developer_keys = payload
+    await user.save()
+    return {"success": True, "developer_keys": user.developer_keys}

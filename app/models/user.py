@@ -42,6 +42,7 @@ class User(Document):
     api_keys: List[ApiKey] = Field(default=[], alias="apiKeys")
     linked_accounts: List[LinkedAccount] = Field(default=[], alias="linkedAccounts")
     profiles: List[Profile] = Field(default=[], alias="profiles")
+    developer_keys: dict = Field(default={}, alias="developerKeys")
     
     # B2B / Limits
     plan_tier: str = Field(default="starter", alias="planTier")
