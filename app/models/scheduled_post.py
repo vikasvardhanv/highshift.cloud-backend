@@ -18,6 +18,9 @@ class ScheduledPost(Document):
     job_id: Optional[str] = Field(None, alias="jobId")
     result: Optional[Any] = None
     error: Optional[str] = None
+    attempts: int = Field(default=0)
+    last_attempt_at: Optional[datetime] = Field(default=None, alias="lastAttemptAt")
+    published_at: Optional[datetime] = Field(default=None, alias="publishedAt")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

@@ -18,6 +18,16 @@ from app.models.user import User, LinkedAccount, ApiKey
 from app.models.oauth_state import OAuthState
 from app.platforms import instagram, twitter, facebook, linkedin, youtube, tiktok, pinterest, threads, bluesky, mastodon
 from app.services.token_service import encrypt_token
+from app.services.auth_service import (
+    build_google_login_url,
+    build_oauth_state_payload,
+    build_user_me_response,
+    get_frontend_url,
+    get_platform_connect_payload,
+    google_login_callback_redirect,
+    login_local_user,
+    register_local_user,
+)
 
 from pydantic import BaseModel, EmailStr
 
@@ -41,428 +51,44 @@ class UserLogin(BaseModel):
 
 @router.post("/register")
 async def register(user_data: UserRegister):
-    import logging
-    logger = logging.getLogger("auth")
-    logger.setLevel(logging.INFO)
-    
-    # Normalize email
-    email = user_data.email.strip().lower()
-    logger.info(f"Registering user: {email}")
-
-    # Check if user exists (Case insensitive lookup)
-    existing_user = await User.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
-    if existing_user:
-        logger.warning(f"Registration failed: Email {email} already exists")
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create new user
-    hashed_pwd = get_password_hash(user_data.password.strip()) # Strip whitespace from password
-    logger.info(f"Generated hash for {email}: {hashed_pwd}")
-    api_key_str = f"hs_{uuid.uuid4().hex}"
-    
-    new_user = User(
-        email=email, # Save normalized email
-        passwordHash=hashed_pwd,
-        apiKeyHash=hash_key(api_key_str),
-        apiKeys=[ApiKey(name="Default Key", keyHash=hash_key(api_key_str))]
-    )
-    await new_user.insert()
-    
-    # Generate JWT
-    access_token = create_access_token(data={"sub": str(new_user.id)})
-    
-    return {
-        "access_token": access_token, 
-        "token_type": "bearer",
-        "api_key": api_key_str # Return API key once on registration
-    }
+    return await register_local_user(user_data.email, user_data.password)
 
 @router.post("/login")
 async def login(user_data: UserLogin):
-    import logging
-    logger = logging.getLogger("auth")
-    
-    # Normalize input
-    email = user_data.email.strip()
-    # Note: We DON'T lower() here for the search query immediately because we want to support 
-    # finding the user even if stored with mixed case, but we use regex 'i' to match any case.
-    
-    logger.info(f"Login attempt for: {email}")
-
-    # Case-insensitive search
-    user = await User.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
-    if not user:
-        logger.warning(f"Login failed: User {email} not found")
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-        
-    if not user.password_hash:
-        logger.warning(f"Login failed: User {email} has no password hash (likely OAuth only)")
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    # Verify password (strip input)
-    is_valid = verify_password(user_data.password.strip(), user.password_hash)
-    if not is_valid:
-        logger.warning(f"Login failed: Invalid password for {user_data.email}")
-        logger.info(f"User ID: {user.id}")
-        logger.info(f"Stored Hash: {user.password_hash}")
-        # logger.info(f"Input Pwd: {user_data.password}") # SECURITY RISK: Don't log passwords
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    access_token = create_access_token(data={"sub": str(user.id)})
-    
-    return {
-        "access_token": access_token, 
-        "token_type": "bearer"
-    }
+    return await login_local_user(user_data.email, user_data.password)
 
 @router.get("/me")
 async def get_current_user_info(user: User = Depends(get_current_user)):
-    """Return the current logged-in user's information."""
-    # Derive display name from email if available
-    name = None
-    initials = "U"
-    
-    if user.email:
-        # Extract name from email (e.g., vikash.vardhan@example.com -> Vikash Vardhan)
-        email_prefix = user.email.split("@")[0]
-        # Convert underscore/dots to spaces and title case
-        name_parts = email_prefix.replace(".", " ").replace("_", " ").split()
-        name = " ".join(part.capitalize() for part in name_parts)
-        
-        # Generate initials from name parts
-        if len(name_parts) >= 2:
-            initials = (name_parts[0][0] + name_parts[-1][0]).upper()
-        elif len(name_parts) == 1:
-            initials = name_parts[0][:2].upper()
-    
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "name": name or "User",
-        "initials": initials,
-        "planTier": user.plan_tier,
-        "maxProfiles": user.max_profiles,
-        "linkedAccountsCount": len(user.linked_accounts),
-        "profilesCount": len(user.profiles)
-    }
+    return build_user_me_response(user)
 
 @router.get("/google")
 async def google_login():
-    """Start Google OAuth flow for Login (not YouTube channel linking)."""
-    client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URL_LOGIN", os.getenv("CORS_ORIGINS", "").split(",")[0] + "/auth/callback") # Default or specific env
-    # Note: If separate redirect needed, assume backend handles it. 
-    # For now, let's reuse the logic but with a specific state to distinguish login vs linking if needed.
-    # Actually, standard Google Login usually uses a simpler scope: openid email profile
-    
-    # We'll use a backend callback for security, then redirect to frontend
-    backend_url = os.getenv("BACKEND_URL")
-    if not backend_url:
-        # Fallback for local development if not set, but warn
-        backend_url = "http://localhost:3000"
-        
-    backend_redirect_uri = f"{backend_url}/auth/google/callback"
-    
-    state = str(uuid.uuid4())
-    scopes = ["openid", "email", "profile"]
-    
-    scope_str = " ".join(scopes)
-    auth_url = (
-        f"https://accounts.google.com/o/oauth2/v2/auth?"
-        f"response_type=code&client_id={client_id}&redirect_uri={backend_redirect_uri}&"
-        f"scope={scope_str}&state={state}&access_type=offline&prompt=consent"
-    )
-    
-    return RedirectResponse(auth_url)
+    return RedirectResponse(build_google_login_url())
 
 @router.get("/google/callback")
 async def google_callback(code: str, state: str):
-    import httpx
-    
-    client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
-    client_secret = os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET")
-    backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'http://localhost:3000')}/auth/google/callback"
-    
-    # DETERMINE FRONTEND URL
-    # Priority:
-    # 1. FRONTEND_URL env var (Explicit override)
-    # 2. CORS_ORIGINS (Split by comma, take first)
-    # 3. Default to localhost
-    
-    frontend_url = os.getenv("FRONTEND_URL")
-    if not frontend_url:
-        origins = os.getenv("CORS_ORIGINS", "").split(",")
-        frontend_url = origins[0] if origins and origins[0] else "http://localhost:5173"
-
-    # Fix: If production and 'http' is found in CORS_ORIGINS but not localhost, force HTTPS
-    if "socialraven.meganai.cloud" in frontend_url and frontend_url.startswith("http://"):
-        frontend_url = frontend_url.replace("http://", "https://")
-
-
-    async with httpx.AsyncClient() as client:
-        # Exchange code
-        token_res = await client.post("https://oauth2.googleapis.com/token", data={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": backend_redirect_uri,
-        })
-        token_data = token_res.json()
-        
-        if "error" in token_data:
-             return RedirectResponse(f"{frontend_url}/login?error=google_auth_failed")
-             
-        access_token = token_data["access_token"]
-        
-        # Get Profile
-        user_info_res = await client.get("https://www.googleapis.com/oauth2/v2/userinfo", headers={
-            "Authorization": f"Bearer {access_token}"
-        })
-        user_info = user_info_res.json()
-        
-        google_id = user_info["id"]
-        email = user_info["email"]
-        
-        # Find or Create User
-        user = await User.find_one({"$or": [{"googleId": google_id}, {"email": email}]})
-        
-        if not user:
-            # Create new
-            api_key_str = f"hs_{uuid.uuid4().hex}"
-            user = User(
-                email=email,
-                googleId=google_id,
-                apiKeyHash=hash_key(api_key_str),
-                apiKeys=[ApiKey(name="Default Key", keyHash=hash_key(api_key_str))]
-            )
-            await user.insert()
-        else:
-            # Link Google ID if only email matched
-            if not user.google_id:
-                user.google_id = google_id
-                await user.save()
-        
-        # Generate JWT
-        jwt_token = create_access_token(data={"sub": str(user.id)})
-        
-        # Redirect to Frontend with Token
-        return RedirectResponse(f"{frontend_url}/auth/callback?token={jwt_token}")
+    redirect_url = await google_login_callback_redirect(code)
+    return RedirectResponse(redirect_url)
 
 
 @router.get("/connect/{platform}")
 async def connect_platform(
     platform: str, 
     profile_id: str = Query(None), # Add profile_id support
+    instance_url: str = Query(None),
     user: User = Depends(get_optional_user)
 ):
     """
     Redirect the user to the platform's OAuth page.
     """
-    state_id = str(uuid.uuid4())
-    state_payload = state_id
-    
-    # Store profile_id in state if present
-    if user:
-        # Use '_' as separator - hyphens conflict with UUID format!
-        state_payload = f"{state_id}_{str(user.id)}"
-        if profile_id:
-            state_payload += f"_{profile_id}"
-    
-    state = state_payload
-    logger.info(f"OAuth Step 1: Connecting {platform} | State: {state}")
-    
-    if platform == "instagram":
-        client_id = os.getenv("FACEBOOK_APP_ID")
-        redirect_uri = os.getenv("INSTAGRAM_REDIRECT_URI")
-        
-        # Instagram Business requires Facebook Page permissions + Instagram permissions
-        default_ig_scopes = [
-            "instagram_basic", 
-            "instagram_content_publish", 
-            "pages_show_list", 
-            "pages_read_engagement"
-        ]
-        
-        env_scopes = os.getenv("INSTAGRAM_SCOPES", "").split(",")
-        final_scopes = list(set(default_ig_scopes + [s for s in env_scopes if s]))
-        
-        url = await instagram.get_auth_url(client_id, redirect_uri, state, final_scopes)
-        return {"authUrl": url}
-
-    if platform == "twitter":
-        client_id = os.getenv("TWITTER_CLIENT_ID")
-        redirect_uri = os.getenv("TWITTER_REDIRECT_URI")
-        
-        # Validate required environment variables
-        if not client_id:
-            raise HTTPException(status_code=500, detail="TWITTER_CLIENT_ID not configured")
-        if not redirect_uri:
-            raise HTTPException(status_code=500, detail="TWITTER_REDIRECT_URI not configured")
-        
-        scopes = os.getenv("TWITTER_SCOPES", "tweet.read,tweet.write,users.read,offline.access").split(",")
-        
-        try:
-            # Explicitly ensure DB is initialized (fixing CollectionWasNotInitialized)
-            from main import ensure_beanie_initialized
-            await ensure_beanie_initialized()
-            
-            code_verifier, code_challenge = twitter.generate_pkce_pair()
-            
-            # Store verifier in DB
-            oauth_state = OAuthState(state_id=state_id, code_verifier=code_verifier)
-            await oauth_state.insert()
-            
-            url = await twitter.get_auth_url(client_id, redirect_uri, state, scopes, code_challenge)
-            return {"authUrl": url}
-        except Exception as e:
-            import traceback
-            error_trace = traceback.format_exc()
-            print(f"Twitter Auth Error [{type(e).__name__}]: {repr(e)}")
-            print(f"Full traceback: {error_trace}")
-            error_msg = str(e) or repr(e) or type(e).__name__
-            raise HTTPException(status_code=500, detail=f"Twitter OAuth setup failed: {error_msg}")
-
-    if platform == "facebook":
-        client_id = os.getenv("FACEBOOK_APP_ID")
-        redirect_uri = os.getenv("FACEBOOK_REDIRECT_URI")
-        
-        # Pure Facebook Scopes - NO Instagram scopes here to prevent "Invalid Scope" if product missing
-        default_fb_scopes = [
-            "public_profile", 
-            # "email", # Removed to avoid "Invalid Scope" error if not enabled in App
-            "pages_show_list", 
-            "pages_manage_posts", 
-            "pages_read_engagement",
-            "pages_manage_metadata",  # Required to access pages list
-            "pages_read_user_content",  # Required to read page content
-            "business_management", # Required to see Pages owned by a Business Manager
-            "read_insights" # For analytics
-        ]
-        
-        env_scopes = os.getenv("FACEBOOK_SCOPES", "").split(",")
-        # Combine unique, filtering out any accidental instagram ones from env if mixed
-        final_scopes = list(set(default_fb_scopes + [s for s in env_scopes if s and "instagram" not in s]))
-        
-        url = await facebook.get_auth_url(client_id, redirect_uri, state, final_scopes)
-        return {"authUrl": url}
-
-    if platform == "linkedin":
-        client_id = os.getenv("LINKEDIN_CLIENT_ID")
-        # Use the exact URI from env, do not modify
-        redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
-        
-        scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social,email").split(",")
-        
-        logger.info(f"LinkedIn Auth Request - ClientID: {client_id} | RedirectURI: {redirect_uri} | Scopes: {scopes}")
-        
-        url = await linkedin.get_auth_url(client_id, redirect_uri, state, scopes)
-        return {"authUrl": url}
-
-    if platform == "youtube":
-        client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
-        redirect_uri = os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI")
-        # Ensure readonly and OIDC scopes are present to avoid 403 on get_me
-        default_scopes = [
-            "https://www.googleapis.com/auth/youtube.upload",
-            "https://www.googleapis.com/auth/youtube.readonly",
-            "openid",
-            "profile",
-            "email"
-        ]
-        env_scopes = os.getenv("YOUTUBE_GOOGLE_SCOPES", "").split(",")
-        final_scopes = list(set(default_scopes + [s for s in env_scopes if s]))
-        
-        logger.info(f"YouTube Auth - ClientID: {client_id[:5]}... | RedirectURI: {redirect_uri}")
-        url = await youtube.get_auth_url(client_id, redirect_uri, state, final_scopes)
-        return {"authUrl": url}
-
-    if platform == "tiktok":
-        client_key = os.getenv("TIKTOK_CLIENT_KEY")
-        redirect_uri = os.getenv("TIKTOK_REDIRECT_URI")
-        scopes = os.getenv("TIKTOK_SCOPES", "user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload").split(",")
-        
-        if not client_key or not redirect_uri:
-             missing = []
-             if not client_key: missing.append("TIKTOK_CLIENT_KEY")
-             if not redirect_uri: missing.append("TIKTOK_REDIRECT_URI")
-             raise HTTPException(status_code=500, detail=f"TikTok Credentials missing: {', '.join(missing)}")
-             
-        url = await tiktok.get_auth_url(client_key, redirect_uri, state, scopes)
-        logger.info(f"Generated TikTok Auth URL: {url}") # DEBUG: Check parameter names
-        return {"authUrl": url}
-    
-    if platform == "pinterest":
-        client_id = os.getenv("PINTEREST_APP_ID")
-        redirect_uri = os.getenv("PINTEREST_REDIRECT_URI")
-        scopes = os.getenv("PINTEREST_SCOPES", "boards:read,pins:read,pins:write").split(",")
-        if not client_id or not redirect_uri:
-             raise HTTPException(status_code=500, detail="Pinterest Credentials not configured")
-        
-        url = await pinterest.get_auth_url(client_id, redirect_uri, state, scopes)
-        return {"authUrl": url}
-
-    if platform == "threads":
-        client_id = os.getenv("THREADS_APP_ID", os.getenv("FACEBOOK_APP_ID")) # Often same as FB
-        redirect_uri = os.getenv("THREADS_REDIRECT_URI")
-        scopes = os.getenv("THREADS_SCOPES", "threads_basic,threads_content_publish").split(",")
-        if not client_id or not redirect_uri:
-             raise HTTPException(status_code=500, detail="Threads Credentials not configured")
-        
-        url = await threads.get_auth_url(client_id, redirect_uri, state, scopes)
-        return {"authUrl": url}
-
-    if platform == "bluesky":
-        # Bluesky uses App Password usually, but valid to have a 'connect' flow for UI consistency?
-        # Or maybe user provides handle/password directly in frontend form?
-        # For now, we return a special status to tell frontend to show a form.
-        return {"action": "show_form", "fields": ["handle", "app_password"]}
-
-    if platform == "mastodon":
-        # Mastodon requires instance URL first.
-        # User should provide 'instance_url' in query.
-        instance_url = request.query_params.get("instance_url")
-        if not instance_url:
-             return {"action": "show_form", "fields": ["instance_url"]}
-        
-        # 1. Register App dynamically (common pattern for Mastodon clients)
-        # OR use a fixed one if building for a specific community. 
-        # We'll assume dynamic registration or user-provided ENV vars per instance is too complex.
-        # Let's try dynamic registration.
-        redirect_uri = os.getenv("MASTODON_REDIRECT_URI", f"{os.getenv('BACKEND_URL')}/auth/mastodon/callback")
-        
-        try:
-            app_data = await mastodon.get_app_credentials(
-                instance_url, 
-                "Social Raven", 
-                redirect_uri, 
-                os.getenv("FRONTEND_URL")
-            )
-            client_id = app_data["client_id"]
-            client_secret = app_data["client_secret"]
-            
-            # We need to store these secrets temporarily associated with the state 
-            # so we can use them in callback!
-            # Using OAuthState model for this
-            oauth_state = OAuthState(
-                state_id=state_id, 
-                extra_data={
-                    "instance_url": instance_url, 
-                    "client_id": client_id, 
-                    "client_secret": client_secret,
-                    "redirect_uri": redirect_uri
-                }
-            )
-            await oauth_state.insert()
-            
-            url = await mastodon.get_auth_url(instance_url, client_id, redirect_uri)
-            return {"authUrl": url}
-            
-        except Exception as e:
-            logger.error(f"Mastodon Registration Failed: {e}")
-            raise HTTPException(status_code=400, detail=f"Could not connect to Mastodon instance: {e}")
-
-    raise HTTPException(status_code=400, detail=f"Platform {platform} not supported yet")
+    state_id, state_payload = build_oauth_state_payload(user, profile_id)
+    logger.info(f"OAuth Step 1: Connecting {platform} | State: {state_payload}")
+    return await get_platform_connect_payload(
+        platform=platform,
+        state_id=state_id,
+        state_payload=state_payload,
+        instance_url=instance_url,
+    )
 
 class BlueskyLogin(BaseModel):
     handle: str
@@ -533,14 +159,7 @@ async def oauth_callback(
     # 2. CORS_ORIGINS (Split by comma, take first)
     # 3. Default to localhost
     
-    frontend_url = os.getenv("FRONTEND_URL")
-    if not frontend_url:
-        origins = os.getenv("CORS_ORIGINS", "").split(",")
-        frontend_url = origins[0] if origins and origins[0] else "http://localhost:5173"
-
-    # Fix: If production and 'http' is found in CORS_ORIGINS but not localhost, force HTTPS
-    if "socialraven.meganai.cloud" in frontend_url and frontend_url.startswith("http://"):
-        frontend_url = frontend_url.replace("http://", "https://")
+    frontend_url = get_frontend_url()
 
 
     # Handle Cancellation / Errors
@@ -1532,4 +1151,3 @@ async def reset_password(req: ResetPasswordRequest):
     await user.save()
     
     return {"status": "success", "message": "Password updated successfully"}
-

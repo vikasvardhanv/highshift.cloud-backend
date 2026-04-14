@@ -24,7 +24,6 @@ from app.routes import (
     account_routes,
     activity_routes
 )
-from app.utils.auth import get_current_user # Added import
 
 # Load environment variables
 load_dotenv()
@@ -72,14 +71,21 @@ async def ensure_beanie_initialized():
 async def lifespan(app: FastAPI):
     await ensure_beanie_initialized()
     
-    # Start Scheduler
+    # Start Scheduler (Postiz-style explicit cron runner switch)
     from app.services.scheduler_service import scheduler
-    scheduler.start()
+    run_scheduler = os.getenv("RUN_SCHEDULER", "true").lower() in {"1", "true", "yes"}
+    if run_scheduler and db_initialized:
+        scheduler.start()
+    elif run_scheduler and not db_initialized:
+        print("Scheduler not started because DB initialization failed.")
+    else:
+        print("Scheduler disabled (RUN_SCHEDULER=false)")
     
     yield
     
     # Shutdown logic
-    scheduler.stop()
+    if run_scheduler and db_initialized:
+        scheduler.stop()
 
 app = FastAPI(title="Social Raven AI Backend", version="1.0.0", lifespan=lifespan)
 

@@ -1,18 +1,25 @@
 import os
+import base64
+import hashlib
 from cryptography.fernet import Fernet
 from app.utils.logger import logger
 
-# Encryption key should be in .env
-ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
-
 def get_fernet():
-    if not ENCRYPTION_KEY:
-        # Fallback to a consistent key for development/serverless if env var is missing
-        # This prevents "Invalid Token" errors when instances restart
-        # Key below is a valid Fernet key (32 url-safe base64-encoded bytes)
-        logger.warning("TOKEN_ENCRYPTION_KEY missing. Using fallback DEV key.")
-        return Fernet(b'C9W_dF7k-U7f_7o8E3r2q1w4e5r6t7y8u9i0o1p2a3s=')
-    return Fernet(ENCRYPTION_KEY.encode())
+    """
+    Use explicit TOKEN_ENCRYPTION_KEY when provided.
+    Otherwise derive a stable Fernet key from JWT_SECRET as a safer fallback.
+    """
+    configured = os.getenv("TOKEN_ENCRYPTION_KEY")
+    if configured:
+        return Fernet(configured.encode())
+
+    fallback_secret = os.getenv("JWT_SECRET", "highshift-dev-only-secret")
+    digest = hashlib.sha256(fallback_secret.encode()).digest()
+    derived_key = base64.urlsafe_b64encode(digest)
+    logger.warning(
+        "TOKEN_ENCRYPTION_KEY missing. Deriving encryption key from JWT_SECRET fallback."
+    )
+    return Fernet(derived_key)
 
 def encrypt_token(token: str) -> str:
     """Encrypt a plain text token."""

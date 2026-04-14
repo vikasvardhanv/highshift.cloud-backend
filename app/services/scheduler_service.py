@@ -1,10 +1,9 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from app.models.scheduled_post import ScheduledPost
-from app.models.user import User
 from app.models.activity import ActivityLog
 from app.services.publishing_service import publish_content
+from app.services.workflow_service import post_workflow_service
 
 logger = logging.getLogger("scheduler")
 
@@ -38,33 +37,20 @@ class BackgroundScheduler:
 
     async def check_due_posts(self):
         """
-        Finds pending posts that are due and publishes them.
+        Atomically claims due posts and publishes them.
         """
-        now = datetime.now(timezone.utc)
-        # Find posts that are pending and scheduled time is passed
-        due_posts = await ScheduledPost.find(
-            ScheduledPost.status == "pending",
-            ScheduledPost.scheduled_for <= now
-        ).to_list()
-
-        if not due_posts:
-            return
-
-        logger.info(f"Found {len(due_posts)} due posts to publish")
-
-        for post in due_posts:
-            # Lock the post effectively by setting status to processing
-            post.status = "processing"
-            await post.save()
-            
+        processed = 0
+        while True:
+            post = await post_workflow_service.claim_next_due_post()
+            if not post:
+                break
             try:
-                # Fetch user to get tokens
-                user = await User.get(post.user_id.ref.id)
+                # Resolve link lazily and safely
+                await post.fetch_link(post.__class__.user_id)
+                user = post.user_id
                 if not user:
-                    logger.error(f"User {post.user_id.ref.id} not found for scheduled post {post.id}")
-                    post.status = "failed"
-                    post.error = "User not found"
-                    await post.save()
+                    await post_workflow_service.mark_failed(post.id, "User not found")
+                    logger.error("User not found for scheduled post %s", post.id)
                     continue
 
                 # Prepare accounts list for service
@@ -80,12 +66,7 @@ class BackgroundScheduler:
                     local_media_paths=[] 
                 )
                 
-                # Check results
-                # If at least one platform succeeded, we mark as published (or partial)
-                # For now, simplistic: if logic ran, mark published, store detailed result
-                post.result = result
-                post.status = "published"
-                await post.save()
+                await post_workflow_service.mark_published(post.id, result)
                 
                 # Log general activity
                 await ActivityLog(
@@ -94,13 +75,14 @@ class BackgroundScheduler:
                     type="success",
                     meta={"postId": str(post.id)}
                 ).insert()
-                
-                logger.info(f"Successfully processed scheduled post {post.id}")
+                processed += 1
+                logger.info("Successfully processed scheduled post %s", post.id)
 
             except Exception as e:
-                logger.error(f"Failed to process scheduled post {post.id}: {e}", exc_info=True)
-                post.status = "failed"
-                post.error = str(e)
-                await post.save()
+                logger.error("Failed to process scheduled post %s: %s", post.id, e, exc_info=True)
+                await post_workflow_service.mark_failed(post.id, str(e))
+
+        if processed:
+            logger.info("Scheduler cycle complete, processed=%s", processed)
 
 scheduler = BackgroundScheduler()

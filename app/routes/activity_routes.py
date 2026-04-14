@@ -19,8 +19,9 @@ async def get_recent_activity(
     Fetch recent activity logs for the user.
     """
     from bson import ObjectId
+    uid = ObjectId(user.id)
     logs = await ActivityLog.find(
-        {"userId.$id": ObjectId(user.id)}
+        {"$or": [{"userId.$id": uid}, {"userId._id": uid}, {"userId": uid}]}
     ).sort("-time").limit(limit).to_list()
     
     return {"activity": logs}
