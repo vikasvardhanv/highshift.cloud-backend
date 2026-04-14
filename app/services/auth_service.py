@@ -7,8 +7,14 @@ from typing import Optional
 import httpx
 from fastapi import HTTPException
 
-from app.models.oauth_state import OAuthState
-from app.models.user import ApiKey, User
+from app.db.postgres import (
+    delete_oauth_state,
+    fetch_user_by_email_ci,
+    fetch_user_by_google_or_email,
+    insert_oauth_state,
+    insert_user,
+    update_user,
+)
 from app.platforms import (
     bluesky,
     facebook,
@@ -43,7 +49,7 @@ def get_frontend_url() -> str:
     return frontend_url
 
 
-def build_oauth_state_payload(user: Optional[User], profile_id: Optional[str]) -> tuple[str, str]:
+def build_oauth_state_payload(user: Optional[object], profile_id: Optional[str]) -> tuple[str, str]:
     state_id = str(uuid.uuid4())
     state_payload = state_id
     if user:
@@ -55,22 +61,32 @@ def build_oauth_state_payload(user: Optional[User], profile_id: Optional[str]) -
 
 async def register_local_user(email: str, password: str) -> dict:
     normalized_email = email.strip().lower()
-    existing_user = await User.find_one(
-        {"email": {"$regex": f"^{normalized_email}$", "$options": "i"}}
-    )
+    existing_user = await fetch_user_by_email_ci(normalized_email)
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed_pwd = get_password_hash(password.strip())
     api_key_str = f"hs_{uuid.uuid4().hex}"
-    new_user = User(
-        email=normalized_email,
-        passwordHash=hashed_pwd,
-        apiKeyHash=hash_key(api_key_str),
-        apiKeys=[ApiKey(name="Default Key", keyHash=hash_key(api_key_str))],
+    new_user = await insert_user(
+        {
+            "email": normalized_email,
+            "password_hash": hashed_pwd,
+            "api_key_hash": hash_key(api_key_str),
+            "api_keys": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": "Default Key",
+                    "keyHash": hash_key(api_key_str),
+                    "created_at": datetime.datetime.utcnow().isoformat(),
+                    "lastUsed": None,
+                }
+            ],
+            "linked_accounts": [],
+            "profiles": [],
+            "developer_keys": {},
+        }
     )
-    await new_user.insert()
-    access_token = create_access_token(data={"sub": str(new_user.id)})
+    access_token = create_access_token(data={"sub": str(new_user["id"])})
 
     return {
         "access_token": access_token,
@@ -80,20 +96,20 @@ async def register_local_user(email: str, password: str) -> dict:
 
 
 async def login_local_user(email: str, password: str) -> dict:
-    user = await User.find_one({"email": {"$regex": f"^{email.strip()}$", "$options": "i"}})
-    if not user or not user.password_hash:
+    user = await fetch_user_by_email_ci(email.strip())
+    if not user or not user.get("password_hash"):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     try:
-        is_valid = verify_password(password.strip(), user.password_hash)
+        is_valid = verify_password(password.strip(), user.get("password_hash"))
     except Exception as err:
         # Handle legacy/corrupt hashes gracefully instead of returning 500.
-        logger.warning("Password verification failed for user %s: %s", user.id, err)
+        logger.warning("Password verification failed for user %s: %s", user.get("id"), err)
         is_valid = False
     if not is_valid:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    access_token = create_access_token(data={"sub": str(user.id)})
+    access_token = create_access_token(data={"sub": str(user["id"])})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -164,22 +180,34 @@ async def google_login_callback_redirect(code: str) -> str:
 
     google_id = user_info["id"]
     email = user_info["email"]
-    user = await User.find_one({"$or": [{"googleId": google_id}, {"email": email}]})
+    user = await fetch_user_by_google_or_email(google_id, email)
 
     if not user:
         api_key_str = f"hs_{uuid.uuid4().hex}"
-        user = User(
-            email=email,
-            googleId=google_id,
-            apiKeyHash=hash_key(api_key_str),
-            apiKeys=[ApiKey(name="Default Key", keyHash=hash_key(api_key_str))],
+        user = await insert_user(
+            {
+                "email": email,
+                "google_id": google_id,
+                "api_key_hash": hash_key(api_key_str),
+                "api_keys": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "Default Key",
+                        "keyHash": hash_key(api_key_str),
+                        "created_at": datetime.datetime.utcnow().isoformat(),
+                        "lastUsed": None,
+                    }
+                ],
+                "linked_accounts": [],
+                "profiles": [],
+                "developer_keys": {},
+            }
         )
-        await user.insert()
-    elif not user.google_id:
-        user.google_id = google_id
-        await user.save()
+    elif not user.get("google_id"):
+        user["google_id"] = google_id
+        await update_user(user["id"], user)
 
-    jwt_token = create_access_token(data={"sub": str(user.id)})
+    jwt_token = create_access_token(data={"sub": str(user["id"])})
     return f"{frontend_url}/auth/callback?token={jwt_token}"
 
 
@@ -218,7 +246,7 @@ async def get_platform_connect_payload(
             "TWITTER_SCOPES", "tweet.read,tweet.write,users.read,offline.access"
         ).split(",")
         code_verifier, code_challenge = twitter.generate_pkce_pair()
-        await OAuthState(state_id=state_id, code_verifier=code_verifier).insert()
+        await insert_oauth_state(state_id=state_id, code_verifier=code_verifier)
         return {
             "authUrl": await twitter.get_auth_url(
                 client_id, redirect_uri, state_payload, scopes, code_challenge
@@ -328,7 +356,7 @@ async def get_platform_connect_payload(
         app_data = await mastodon.get_app_credentials(
             instance_url, "Social Raven", redirect_uri, os.getenv("FRONTEND_URL")
         )
-        await OAuthState(
+        await insert_oauth_state(
             state_id=state_id,
             extra_data={
                 "instance_url": instance_url,
@@ -336,7 +364,7 @@ async def get_platform_connect_payload(
                 "client_secret": app_data["client_secret"],
                 "redirect_uri": redirect_uri,
             },
-        ).insert()
+        )
         return {
             "authUrl": await mastodon.get_auth_url(
                 instance_url, app_data["client_id"], redirect_uri

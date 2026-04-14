@@ -9,9 +9,9 @@ import httpx
 from typing import List, Optional, Dict, Any
 
 from app.models.user import User
-from app.models.activity import ActivityLog
 from app.models.media import Media
 from app.services.token_service import decrypt_token, encrypt_token
+from app.db.postgres import insert_activity
 from app.platforms import instagram, twitter, facebook, linkedin, tiktok, youtube, pinterest, threads, bluesky, mastodon
 
 logger = logging.getLogger("publishing")
@@ -277,7 +277,7 @@ async def publish_content(
                 
                 res = await twitter.post_tweet(token, content, media_ids=media_ids)
                 results.append({"platform": "twitter", "status": "success", "id": res.get("data", {}).get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to Twitter", platform="Twitter", type="success").insert()
+                await insert_activity(str(user.id), "Posted to Twitter", platform="Twitter", type_="success")
 
             # --- INSTAGRAM ---
             elif platform == "instagram":
@@ -300,7 +300,7 @@ async def publish_content(
                     res = await instagram.publish_image(token, account_id, media_items[0]["url"], content, local_path=media_items[0]["path"])
                 
                 results.append({"platform": "instagram", "status": "success", "id": res.get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to Instagram", platform="Instagram", type="success").insert()
+                await insert_activity(str(user.id), "Posted to Instagram", platform="Instagram", type_="success")
 
             # --- FACEBOOK ---
             elif platform == "facebook":
@@ -322,7 +322,7 @@ async def publish_content(
                     res = await facebook.post_to_page(token, account_id, content)
                 
                 results.append({"platform": "facebook", "status": "success", "id": res.get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to Facebook", platform="Facebook", type="success").insert()
+                await insert_activity(str(user.id), "Posted to Facebook", platform="Facebook", type_="success")
 
             # --- LINKEDIN ---
             elif platform == "linkedin":
@@ -355,7 +355,7 @@ async def publish_content(
                     res = await linkedin.post_to_profile(token, account_id, content)
                 
                 results.append({"platform": "linkedin", "status": "success", "id": res.get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to LinkedIn", platform="LinkedIn", type="success").insert()
+                await insert_activity(str(user.id), "Posted to LinkedIn", platform="LinkedIn", type_="success")
             
             # --- TIKTOK ---
             elif platform == "tiktok":
@@ -369,7 +369,7 @@ async def publish_content(
                     continue
                 res = await tiktok.post_video(token, account_id, video_url, content)
                 results.append({"platform": "tiktok", "status": "success", "id": res.get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to TikTok", platform="TikTok", type="success").insert()
+                await insert_activity(str(user.id), "Posted to TikTok", platform="TikTok", type_="success")
 
             # --- YOUTUBE ---
             elif platform == "youtube":
@@ -378,7 +378,7 @@ async def publish_content(
                     continue
                 res = await youtube.upload_video(token, local_media_paths[0], content[:100], content)
                 results.append({"platform": "youtube", "status": "success", "id": res.get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to YouTube", platform="YouTube", type="success").insert()
+                await insert_activity(str(user.id), "Posted to YouTube", platform="YouTube", type_="success")
 
             # --- PINTEREST ---
             elif platform == "pinterest":
@@ -392,13 +392,13 @@ async def publish_content(
                 
                 res = await pinterest.create_pin(token, board_id, content[:100], content, link=link_in_text, media_url=media_urls[0])
                 results.append({"platform": "pinterest", "status": "success", "id": res.get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to Pinterest", platform="Pinterest", type="success").insert()
+                await insert_activity(str(user.id), "Posted to Pinterest", platform="Pinterest", type_="success")
 
             # --- THREADS ---
             elif platform == "threads":
                 res = await threads.post_thread(token, account_id, content, media_urls=media_items)
                 results.append({"platform": "threads", "status": "success", "id": res.get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to Threads", platform="Threads", type="success").insert()
+                await insert_activity(str(user.id), "Posted to Threads", platform="Threads", type_="success")
 
             # --- MASTODON ---
             elif platform == "mastodon":
@@ -419,7 +419,7 @@ async def publish_content(
                 
                 res = await mastodon.post_status(instance_url, token, content, media_ids)
                 results.append({"platform": "mastodon", "status": "success", "id": res.get("id")})
-                await ActivityLog(userId=str(user.id), title="Posted to Mastodon", platform="Mastodon", type="success").insert()
+                await insert_activity(str(user.id), "Posted to Mastodon", platform="Mastodon", type_="success")
 
             # --- BLUESKY ---
             elif platform == "bluesky":
@@ -436,7 +436,7 @@ async def publish_content(
                 
                 res = await bluesky.create_record(token, account_id, content, embed=embed)
                 results.append({"platform": "bluesky", "status": "success", "id": res.get("uri")})
-                await ActivityLog(userId=str(user.id), title="Posted to Bluesky", platform="Bluesky", type="success").insert()
+                await insert_activity(str(user.id), "Posted to Bluesky", platform="Bluesky", type_="success")
 
             else:
                 results.append({"platform": platform, "status": "failed", "error": "Not implemented"})
@@ -444,13 +444,13 @@ async def publish_content(
         except Exception as e:
             logger.error(f"Failed to post to {platform}: {e}", exc_info=True)
             results.append({"platform": platform, "status": "failed", "error": str(e)})
-            await ActivityLog(
-                userId=str(user.id), 
-                title=f"Failed to post to {platform}", 
-                platform=platform, 
-                type="error", 
-                meta={"error": str(e)}
-            ).insert()
+            await insert_activity(
+                str(user.id),
+                f"Failed to post to {platform}",
+                platform=platform,
+                type_="error",
+                meta={"error": str(e)},
+            )
 
     # Cleanup temporary files
     for path in temp_files_to_cleanup:

@@ -12,6 +12,7 @@ from app.models.analytics import AnalyticsSnapshot
 from app.models.oauth_state import OAuthState
 from app.models.media import Media
 from app.models.activity import ActivityLog
+from app.db.postgres import get_pool, init_postgres, is_postgres_url
 from app.routes import (
     ai_routes, 
     analytics_routes, 
@@ -36,13 +37,23 @@ async def ensure_beanie_initialized():
         return True
     
     # Primary config going forward
-    mongo_uri = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")
-    if not mongo_uri:
+    database_url = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")
+    if not database_url:
         print("CRITICAL: DATABASE_URL not found")
         return False
 
+    if is_postgres_url(database_url):
+        try:
+            await init_postgres(database_url)
+            db_initialized = True
+            print("Postgres initialized successfully")
+            return True
+        except Exception as e:
+            print(f"Failed to initialize Postgres ({type(e).__name__}): {repr(e)}")
+            return False
+
     try:
-        client = AsyncIOMotorClient(mongo_uri)
+        client = AsyncIOMotorClient(database_url)
         
         # Safely get database name
         try:
@@ -76,7 +87,9 @@ async def lifespan(app: FastAPI):
     
     # Start Scheduler (Postiz-style explicit cron runner switch)
     from app.services.scheduler_service import scheduler
-    run_scheduler = os.getenv("RUN_SCHEDULER", "true").lower() in {"1", "true", "yes"}
+    db_url = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")
+    default_scheduler = "false" if is_postgres_url(db_url) else "true"
+    run_scheduler = os.getenv("RUN_SCHEDULER", default_scheduler).lower() in {"1", "true", "yes"}
     if run_scheduler and db_initialized:
         scheduler.start()
     elif run_scheduler and not db_initialized:
@@ -197,13 +210,19 @@ except Exception as e:
 @app.get("/health")
 async def health_check():
     global db_initialized
+    db_url = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")
+    postgres_mode = is_postgres_url(db_url)
     try:
         # Check if initialized
         if not db_initialized:
             await ensure_beanie_initialized()
-            
-        # Try a simple query
-        await User.count()
+
+        if postgres_mode:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute("select 1")
+        else:
+            await User.count()
         db_status = "connected"
     except Exception as e:
         db_status = f"error: {str(e)}"

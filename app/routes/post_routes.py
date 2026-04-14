@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Optional
-from app.utils.auth import get_current_user
-from app.models.user import User
+from app.utils.auth import get_current_user, AuthUser
 from app.platforms import instagram, twitter, facebook, linkedin
 from app.services.token_service import decrypt_token
 from app.utils.logger import logger
+from app.db.postgres import insert_media_asset, list_media_assets, delete_media_asset
 import json
 import httpx
 
@@ -22,7 +22,7 @@ class MultiPostRequest(BaseModel):
     local_media_paths: Optional[List[str]] = [] # For internal use (Twitter uploads)
 
 @router.post("/multi")
-async def multi_platform_post(req: MultiPostRequest, user: User = Depends(get_current_user)):
+async def multi_platform_post(req: MultiPostRequest, user: AuthUser = Depends(get_current_user)):
     from app.services.publishing_service import publish_content
     
     # Transform Pydantic models to list of dicts for the service
@@ -46,7 +46,7 @@ async def upload_and_post(
     content: str = Form(...),
     files: List[UploadFile] = File(default=[]),
     media_urls: str = Form(default="[]"),  # JSON string of URL array
-    user: User = Depends(get_current_user)
+    user: AuthUser = Depends(get_current_user)
 ):
     """
     Upload media files or provide URLs, then publish to selected platforms.
@@ -115,7 +115,7 @@ async def upload_and_post(
 @router.post("/media-upload")
 async def upload_media_only(
     files: List[UploadFile] = File(...),
-    user: User = Depends(get_current_user)
+    user: AuthUser = Depends(get_current_user)
 ):
     """
     Upload media files, persist them in the database (Media model), and return their URLs.
@@ -125,7 +125,6 @@ async def upload_media_only(
     import uuid
     import os
     import base64
-    from app.models.media import Media
     
     uploaded_urls = []
     local_paths = [] 
@@ -179,18 +178,16 @@ async def upload_media_only(
             except Exception:
                 pass
 
-            # 4. Save to Database
-            media_doc = Media(
-                userId=str(user.id),
+            await insert_media_asset(
+                user_id=str(user.id),
                 filename=f.filename,
-                contentType=f.content_type or f"image/{ext}",
-                fileType="image" if "image" in (f.content_type or "") else "video",
-                cloudUrl=final_cloud_url,
-                dataUrl=final_data_url, # Warning: This can be large. Ideally use S3/GridFS.
-                localPath=final_local_path,
-                sizeBytes=len(content)
+                content_type=f.content_type or f"image/{ext}",
+                file_type="image" if "image" in (f.content_type or "") else "video",
+                cloud_url=final_cloud_url,
+                data_url=final_data_url,
+                local_path=final_local_path,
+                size_bytes=len(content),
             )
-            await media_doc.insert()
             
         except Exception as e:
             logger.error(f"Failed to process file {f.filename}: {e}")
@@ -205,25 +202,21 @@ async def upload_media_only(
 async def get_media_library(
     limit: int = 50,
     skip: int = 0,
-    user: User = Depends(get_current_user)
+    user: AuthUser = Depends(get_current_user)
 ):
     """
     Fetch user's media library.
     """
-    from app.models.media import Media
-    
-    docs = await Media.find(
-        {"userId": str(user.id)}
-    ).sort(-Media.created_at).limit(limit).skip(skip).to_list()
+    docs = await list_media_assets(str(user.id), limit=limit, skip=skip)
     
     return {
         "media": [
             {
-                "id": str(m.id),
-                "url": m.get_display_url(),
-                "filename": m.filename,
-                "type": m.file_type,
-                "created_at": m.created_at
+                "id": str(m["id"]),
+                "url": m.get("cloud_url") or m.get("data_url") or m.get("local_path"),
+                "filename": m.get("filename"),
+                "type": m.get("file_type"),
+                "created_at": m.get("created_at"),
             }
             for m in docs
         ]
@@ -232,24 +225,15 @@ async def get_media_library(
 @router.delete("/media/{media_id}")
 async def delete_media(
     media_id: str,
-    user: User = Depends(get_current_user)
+    user: AuthUser = Depends(get_current_user)
 ):
     """
     Delete a media item from the library.
     """
-    from app.models.media import Media
-    from beanie import PydanticObjectId
-    
-    try:
-        obj_id = PydanticObjectId(media_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid media ID format")
-    
-    media = await Media.find_one({"_id": obj_id, "userId": str(user.id)})
-    if not media:
+    ok = await delete_media_asset(str(user.id), media_id)
+    if not ok:
         raise HTTPException(status_code=404, detail="Media not found")
-        
-    await media.delete()
+
     logger.info(f"Deleted media {media_id} for user {user.id}")
     
     return {"status": "success", "id": media_id}

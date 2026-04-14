@@ -2,6 +2,7 @@ import hashlib
 import os
 from datetime import datetime, timedelta
 from typing import Optional
+from types import SimpleNamespace
 
 from fastapi import Security, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -9,7 +10,138 @@ from fastapi.security.api_key import APIKeyHeader
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from app.models.user import User
+from app.db.postgres import fetch_user_by_api_key_hash, fetch_user_by_id, update_user
+
+
+class AuthUser(SimpleNamespace):
+    """
+    Runtime user object used across routes/services.
+    Mimics prior Beanie object shape and provides async save().
+    """
+
+    async def save(self):
+        linked_accounts = []
+        for a in (getattr(self, "linked_accounts", []) or []):
+            if isinstance(a, dict):
+                linked_accounts.append(a)
+            else:
+                linked_accounts.append(
+                    {
+                        "platform": getattr(a, "platform", None),
+                        "accountId": getattr(a, "account_id", None),
+                        "username": getattr(a, "username", None),
+                        "displayName": getattr(a, "display_name", None),
+                        "accessTokenEnc": getattr(a, "access_token_enc", None),
+                        "refreshTokenEnc": getattr(a, "refresh_token_enc", None),
+                        "expiresAt": (
+                            getattr(a, "expires_at", None).isoformat()
+                            if hasattr(getattr(a, "expires_at", None), "isoformat")
+                            else getattr(a, "expires_at", None)
+                        ),
+                        "profileId": getattr(a, "profile_id", None),
+                        "rawProfile": getattr(a, "raw_profile", None),
+                        "picture": getattr(a, "picture", None),
+                    }
+                )
+
+        profiles = []
+        for p in (getattr(self, "profiles", []) or []):
+            if isinstance(p, dict):
+                profiles.append(p)
+            else:
+                profiles.append(
+                    {
+                        "id": getattr(p, "id", None),
+                        "name": getattr(p, "name", None),
+                        "created_at": (
+                            getattr(p, "created_at", None).isoformat()
+                            if hasattr(getattr(p, "created_at", None), "isoformat")
+                            else getattr(p, "created_at", None)
+                        ),
+                    }
+                )
+
+        api_keys = []
+        for k in (getattr(self, "api_keys", []) or []):
+            if isinstance(k, dict):
+                api_keys.append(k)
+            else:
+                api_keys.append(
+                    {
+                        "id": getattr(k, "id", None),
+                        "name": getattr(k, "name", "Default Key"),
+                        "keyHash": getattr(k, "key_hash", None),
+                        "created_at": getattr(k, "created_at", None),
+                        "lastUsed": getattr(k, "last_used", None),
+                    }
+                )
+
+        payload = {
+            "id": str(self.id),
+            "email": getattr(self, "email", None),
+            "password_hash": getattr(self, "password_hash", None),
+            "google_id": getattr(self, "google_id", None),
+            "api_key_hash": getattr(self, "api_key_hash", None),
+            "api_keys": api_keys,
+            "linked_accounts": linked_accounts,
+            "profiles": profiles,
+            "developer_keys": getattr(self, "developer_keys", {}) or {},
+            "plan_tier": getattr(self, "plan_tier", "starter"),
+            "max_profiles": getattr(self, "max_profiles", 50),
+        }
+        await update_user(str(self.id), payload)
+
+
+def _to_auth_user(row: dict) -> AuthUser:
+    api_keys = []
+    for k in (row.get("api_keys") or []):
+        api_keys.append(
+            SimpleNamespace(
+                id=k.get("id"),
+                name=k.get("name", "Default Key"),
+                key_hash=k.get("keyHash") or k.get("key_hash"),
+                created_at=k.get("created_at") or k.get("createdAt"),
+                last_used=k.get("lastUsed") or k.get("last_used"),
+            )
+        )
+
+    linked_accounts = []
+    for item in (row.get("linked_accounts") or []):
+        linked_accounts.append(
+            SimpleNamespace(
+                platform=item.get("platform"),
+                account_id=item.get("accountId") or item.get("account_id"),
+                username=item.get("username"),
+                display_name=item.get("displayName") or item.get("display_name"),
+                access_token_enc=item.get("accessTokenEnc") or item.get("access_token_enc"),
+                refresh_token_enc=item.get("refreshTokenEnc") or item.get("refresh_token_enc"),
+                expires_at=item.get("expiresAt") or item.get("expires_at"),
+                profile_id=item.get("profileId") or item.get("profile_id"),
+                raw_profile=item.get("rawProfile") or item.get("raw_profile"),
+                picture=item.get("picture"),
+            )
+        )
+
+    return AuthUser(
+        id=str(row.get("id")),
+        email=row.get("email"),
+        password_hash=row.get("password_hash"),
+        google_id=row.get("google_id"),
+        api_key_hash=row.get("api_key_hash"),
+        api_keys=api_keys,
+        linked_accounts=linked_accounts,
+        profiles=[
+            SimpleNamespace(
+                id=p.get("id"),
+                name=p.get("name"),
+                created_at=p.get("created_at"),
+            )
+            for p in (row.get("profiles") or [])
+        ],
+        developer_keys=row.get("developer_keys") or {},
+        plan_tier=row.get("plan_tier") or "starter",
+        max_profiles=row.get("max_profiles") or 50,
+    )
 
 # --- Configuration ---
 # You should ensure JWT_SECRET is set in .env
@@ -59,9 +191,9 @@ async def get_current_user(
             payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
             user_id: str = payload.get("sub")
             if user_id:
-                user = await User.get(user_id)
-                if user:
-                    return user
+                user_row = await fetch_user_by_id(user_id)
+                if user_row:
+                    return _to_auth_user(user_row)
         except JWTError as e:
             print(f"JWT Verification Failed: {str(e)}")
             pass # Fallback to checking API Key
@@ -70,19 +202,20 @@ async def get_current_user(
     if api_key:
         hashed = hash_key(api_key)
         try:
-            user = await User.find_one({"$or": [{"apiKeyHash": hashed}, {"apiKeys.keyHash": hashed}]})
-            if user:
-                # B2B Audit: Update last_used
-                if user.api_keys:
-                    try:
-                        for k in user.api_keys:
-                            if k.key_hash == hashed:
-                                k.last_used = datetime.utcnow()
-                                await user.save()
-                                break
-                    except Exception:
-                        pass
-                return user
+            user_row = await fetch_user_by_api_key_hash(hashed)
+            if user_row:
+                # B2B Audit: update lastUsed in json list if matching nested API key hash
+                keys = user_row.get("api_keys") or []
+                changed = False
+                for k in keys:
+                    if k.get("keyHash") == hashed:
+                        k["lastUsed"] = datetime.utcnow().isoformat()
+                        changed = True
+                        break
+                if changed:
+                    user_row["api_keys"] = keys
+                    await update_user(str(user_row["id"]), user_row)
+                return _to_auth_user(user_row)
         except Exception as e:
             print(f"Auth Error (User Load Failed): {e}")
 
@@ -104,14 +237,15 @@ async def get_optional_user(
             payload = jwt.decode(bearer.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
             user_id = payload.get("sub")
             if user_id:
-                user = await User.get(user_id)
-                if user:
-                    return user
+                user_row = await fetch_user_by_id(user_id)
+                if user_row:
+                    return _to_auth_user(user_row)
         
         if api_key:
             hashed = hash_key(api_key)
-            user = await User.find_one({"$or": [{"apiKeyHash": hashed}, {"apiKeys.keyHash": hashed}]})
-            return user
+            user_row = await fetch_user_by_api_key_hash(hashed)
+            if user_row:
+                return _to_auth_user(user_row)
     except Exception:
         pass
         
