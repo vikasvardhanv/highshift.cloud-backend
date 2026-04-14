@@ -35,9 +35,10 @@ async def ensure_beanie_initialized():
     if db_initialized:
         return True
     
-    mongo_uri = os.getenv("MONGODB_URI")
+    # Primary config going forward
+    mongo_uri = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")
     if not mongo_uri:
-        print("CRITICAL: MONGODB_URI not found")
+        print("CRITICAL: DATABASE_URL not found")
         return False
 
     try:

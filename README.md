@@ -40,7 +40,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your MONGODB_URI and OPENAI_API_KEY
+# Edit .env with your DATABASE_URL and OPENAI_API_KEY
 ```
 
 ### 3. Run
