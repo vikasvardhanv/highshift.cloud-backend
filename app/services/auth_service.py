@@ -84,7 +84,12 @@ async def login_local_user(email: str, password: str) -> dict:
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    is_valid = verify_password(password.strip(), user.password_hash)
+    try:
+        is_valid = verify_password(password.strip(), user.password_hash)
+    except Exception as err:
+        # Handle legacy/corrupt hashes gracefully instead of returning 500.
+        logger.warning("Password verification failed for user %s: %s", user.id, err)
+        is_valid = False
     if not is_valid:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -339,4 +344,3 @@ async def get_platform_connect_payload(
         }
 
     raise HTTPException(status_code=400, detail=f"Platform {platform} not supported yet")
-
