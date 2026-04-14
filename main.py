@@ -1,4 +1,5 @@
 import os
+import re
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -109,6 +110,11 @@ app = FastAPI(title="Social Raven AI Backend", version="1.0.0", lifespan=lifespa
 # Priority: Get from env, but handle the case where env is empty or just "*"
 env_origins = os.getenv("CORS_ORIGINS", "").split(",")
 origins = [o.strip().rstrip("/") for o in env_origins if o.strip()]
+origin_regex = os.getenv(
+    "CORS_ORIGIN_REGEX",
+    r"^https://([a-z0-9-]+\.)*highshift\.cloud$|^https://highshift-cloud-frontend.*\.vercel\.app$|^http://(localhost|127\.0\.0\.1)(:\d+)?$",
+)
+origin_re = re.compile(origin_regex)
 
 # Explicitly add production and common dev domains
 production_domains = [
@@ -141,6 +147,7 @@ else:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
+        allow_origin_regex=origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -170,7 +177,12 @@ class ErrorMiddleware(BaseHTTPMiddleware):
             origin = request.headers.get("origin")
             if origin:
                 # Basic check: allow if in our list or if we are in wildcard mode
-                if "*" in origins or origin in origins:
+                normalized_origin = origin.rstrip("/")
+                if (
+                    "*" in origins
+                    or normalized_origin in origins
+                    or origin_re.match(normalized_origin)
+                ):
                     response.headers["Access-Control-Allow-Origin"] = origin
                     response.headers["Access-Control-Allow-Credentials"] = "true"
                     response.headers["Access-Control-Allow-Methods"] = "*"
