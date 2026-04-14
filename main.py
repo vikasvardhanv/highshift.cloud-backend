@@ -108,17 +108,24 @@ app = FastAPI(title="Social Raven AI Backend", version="1.0.0", lifespan=lifespa
 # CORS configuration
 # Priority: Get from env, but handle the case where env is empty or just "*"
 env_origins = os.getenv("CORS_ORIGINS", "").split(",")
-origins = [o.strip() for o in env_origins if o.strip()]
+origins = [o.strip().rstrip("/") for o in env_origins if o.strip()]
 
 # Explicitly add production and common dev domains
 production_domains = [
-    "https://socialraven.meganai.cloud", 
+    "https://highshift.cloud",
+    "https://www.highshift.cloud",
+    "https://app.highshift.cloud",
+    "https://highshift-cloud-frontend.vercel.app",
+    "https://socialraven.meganai.cloud",
     "https://www.socialraven.meganai.cloud",
-    "https://socialraven.meganai.cloud.vercel.app"
+    "https://socialraven.meganai.cloud.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 for d in production_domains:
-    if d not in origins:
-        origins.append(d)
+    normalized = d.rstrip("/")
+    if normalized not in origins:
+        origins.append(normalized)
 
 # For development, if "*" is in origins, we allow all
 if "*" in origins or not origins:
