@@ -34,7 +34,9 @@ from pydantic import BaseModel, EmailStr
 # Add a simple helper to be used as a dependency
 async def ensure_db():
     from main import ensure_beanie_initialized
-    await ensure_beanie_initialized()
+    ok = await ensure_beanie_initialized()
+    if not ok:
+        raise HTTPException(status_code=503, detail="Database unavailable")
 
 router = APIRouter(prefix="/auth", tags=["Auth"], dependencies=[Depends(ensure_db)])
 

@@ -33,12 +33,12 @@ db_initialized = False
 async def ensure_beanie_initialized():
     global db_initialized
     if db_initialized:
-        return
+        return True
     
     mongo_uri = os.getenv("MONGODB_URI")
     if not mongo_uri:
         print("CRITICAL: MONGODB_URI not found")
-        return
+        return False
 
     try:
         client = AsyncIOMotorClient(mongo_uri)
@@ -64,8 +64,10 @@ async def ensure_beanie_initialized():
         )
         db_initialized = True
         print("Beanie initialized successfully")
+        return True
     except Exception as e:
         print(f"Failed to initialize Beanie: {e}")
+        return False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

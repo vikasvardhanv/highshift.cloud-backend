@@ -5,7 +5,9 @@ from typing import List
 
 async def ensure_db():
     from main import ensure_beanie_initialized
-    await ensure_beanie_initialized()
+    ok = await ensure_beanie_initialized()
+    if not ok:
+        raise HTTPException(status_code=503, detail="Database unavailable")
 
 router = APIRouter(prefix="/linked-accounts", tags=["Accounts"], dependencies=[Depends(ensure_db)])
 
