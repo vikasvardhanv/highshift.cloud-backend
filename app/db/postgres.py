@@ -121,6 +121,9 @@ async def init_postgres(database_url: str) -> bool:
             # Migrate missing columns for existing tables
             migrations = [
                 ("users", "google_id", "add column if not exists google_id text"),
+                ("users", "full_name", "add column if not exists full_name text"),
+                ("users", "avatar_url", "add column if not exists avatar_url text"),
+                ("users", "is_active", "add column if not exists is_active boolean not null default true"),
                 ("users", "api_key_hash", "add column if not exists api_key_hash text unique"),
                 ("users", "api_keys", "add column if not exists api_keys jsonb not null default '[]'::jsonb"),
                 ("users", "linked_accounts", "add column if not exists linked_accounts jsonb not null default '[]'::jsonb"),
@@ -255,31 +258,86 @@ async def fetch_user_by_api_key_hash(key_hash: str) -> Optional[Dict[str, Any]]:
 async def insert_user(data: Dict[str, Any]) -> Dict[str, Any]:
     pool = await get_pool()
     user_id = data.get("id") or str(uuid.uuid4())
+    email = data.get("email")
+    password_hash = data.get("password_hash")
+    google_id = data.get("google_id")
+    api_key_hash = data.get("api_key_hash")
+    api_keys = json.dumps(data.get("api_keys") or [])
+    linked_accounts = json.dumps(data.get("linked_accounts") or [])
+    profiles = json.dumps(data.get("profiles") or [])
+    developer_keys = json.dumps(data.get("developer_keys") or {})
+    plan_tier = data.get("plan_tier") or "starter"
+    max_profiles = int(data.get("max_profiles") or 50)
+    full_name = data.get("email", "").split("@")[0] if email else "User"
+    
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            insert into users (
-              id, email, password_hash, google_id, api_key_hash,
-              api_keys, linked_accounts, profiles, developer_keys, plan_tier, max_profiles
-            ) values (
-              $1::uuid, $2, $3, $4, $5,
-              $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11
-            )
-            returning *
-            """,
-            user_id,
-            data.get("email"),
-            data.get("password_hash"),
-            data.get("google_id"),
-            data.get("api_key_hash"),
-            json.dumps(data.get("api_keys") or []),
-            json.dumps(data.get("linked_accounts") or []),
-            json.dumps(data.get("profiles") or []),
-            json.dumps(data.get("developer_keys") or {}),
-            data.get("plan_tier") or "starter",
-            int(data.get("max_profiles") or 50),
-        )
-    return _record_to_dict(row)  # type: ignore
+        # Check which columns exist
+        columns = await conn.fetch("""
+            select column_name from information_schema.columns 
+            where table_name = 'users'
+        """)
+        existing_cols = {r['column_name'] for r in columns}
+        
+        # Build dynamic insert based on existing columns
+        col_list = ["id", "email", "password_hash"]
+        val_list = [user_id, email, password_hash]
+        params = 3
+        
+        if "google_id" in existing_cols:
+            col_list.append("google_id")
+            val_list.append(google_id)
+            params += 1
+        
+        if "full_name" in existing_cols:
+            col_list.append("full_name")
+            val_list.append(full_name)
+            params += 1
+            
+        if "is_active" in existing_cols:
+            col_list.append("is_active")
+            val_list.append(True)
+            params += 1
+        
+        if "api_key_hash" in existing_cols:
+            col_list.append("api_key_hash")
+            val_list.append(api_key_hash)
+            params += 1
+            
+        if "api_keys" in existing_cols:
+            col_list.append("api_keys")
+            val_list.append(api_keys)
+            params += 1
+            
+        if "linked_accounts" in existing_cols:
+            col_list.append("linked_accounts")
+            val_list.append(linked_accounts)
+            params += 1
+            
+        if "profiles" in existing_cols:
+            col_list.append("profiles")
+            val_list.append(profiles)
+            params += 1
+            
+        if "developer_keys" in existing_cols:
+            col_list.append("developer_keys")
+            val_list.append(developer_keys)
+            params += 1
+            
+        if "plan_tier" in existing_cols:
+            col_list.append("plan_tier")
+            val_list.append(plan_tier)
+            params += 1
+            
+        if "max_profiles" in existing_cols:
+            col_list.append("max_profiles")
+            val_list.append(max_profiles)
+            params += 1
+        
+        placeholders = ", ".join([f"${i}" for i in range(1, params + 1)])
+        query = f"insert into users ({', '.join(col_list)}) values ({placeholders}) returning *"
+        
+        row = await conn.fetchrow(query, *val_list)
+    return _record_to_dict(row)
 
 
 async def update_user(user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
