@@ -35,10 +35,13 @@ async def publish_scheduled_posts(request: Request):
     # Ensure DB is initialized
     from main import ensure_beanie_initialized
     await ensure_beanie_initialized()
-    
-    # Import and run the scheduler check
-    from app.services.scheduler_service import BackgroundScheduler
-    temp_scheduler = BackgroundScheduler()
-    await temp_scheduler.check_due_posts()
-    
-    return {"status": "ok", "message": "Scheduled posts check completed"}
+
+    # Process due posts from Postgres scheduler queue.
+    from app.services.postgres_scheduler_service import process_due_posts
+    stats = await process_due_posts(limit=100)
+
+    return {
+        "status": "ok",
+        "message": "Scheduled posts check completed",
+        "stats": stats,
+    }

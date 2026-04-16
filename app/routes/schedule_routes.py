@@ -2,9 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from app.utils.auth import AuthUser
 from app.utils.auth import get_current_user
 from app.db.postgres import create_scheduled_post, list_scheduled_posts, cancel_scheduled_post, insert_activity
+from app.temporal.scheduler import schedule_post_workflow
 from typing import List, Optional
 import datetime
 from collections import defaultdict
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/schedule", tags=["Schedule"])
 
@@ -73,6 +77,12 @@ async def create_schedule(
         scheduled_for_iso=dt.isoformat(),
         media=media_urls,
     )
+    temporal_job_id = None
+    try:
+        temporal_job_id = await schedule_post_workflow(str(post["id"]), dt)
+    except Exception as e:
+        # Keep API availability; cron/APScheduler fallback can still process pending posts.
+        logger.error("Failed to schedule Temporal workflow for post %s: %s", post["id"], e, exc_info=True)
 
     # Log activity
     await insert_activity(
@@ -92,6 +102,7 @@ async def create_schedule(
             "scheduledFor": post["scheduled_for"].isoformat(),
             "media": post.get("media") or [],
             "accounts": accounts,
+            "jobId": temporal_job_id or post.get("job_id"),
         },
     }
 

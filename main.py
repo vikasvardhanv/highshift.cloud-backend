@@ -1,9 +1,11 @@
 import os
 import re
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from contextlib import suppress
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
 from app.models.user import User
@@ -85,6 +87,7 @@ async def ensure_beanie_initialized():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await ensure_beanie_initialized()
+    temporal_worker_task = None
     
     # Start Scheduler (Postiz-style explicit cron runner switch)
     from app.services.scheduler_service import scheduler
@@ -97,12 +100,25 @@ async def lifespan(app: FastAPI):
         print("Scheduler not started because DB initialization failed.")
     else:
         print("Scheduler disabled (RUN_SCHEDULER=false)")
+
+    # Optional: run Temporal worker in-process for simple deployments.
+    temporal_enabled = os.getenv("TEMPORAL_ENABLED", "false").lower() in {"1", "true", "yes"}
+    run_temporal_worker = os.getenv("RUN_TEMPORAL_WORKER", "false").lower() in {"1", "true", "yes"}
+    if temporal_enabled and run_temporal_worker:
+        from app.temporal.worker import run_temporal_worker as run_worker
+
+        temporal_worker_task = asyncio.create_task(run_worker())
+        print("Temporal worker started in-process")
     
     yield
     
     # Shutdown logic
     if run_scheduler and db_initialized:
         scheduler.stop()
+    if temporal_worker_task:
+        temporal_worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await temporal_worker_task
 
 app = FastAPI(title="Social Raven AI Backend", version="1.0.0", lifespan=lifespan)
 

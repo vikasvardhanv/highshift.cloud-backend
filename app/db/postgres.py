@@ -585,6 +585,120 @@ async def cancel_scheduled_post(user_id: str, post_id: str) -> bool:
     return res.endswith("1")
 
 
+async def get_scheduled_post(post_id: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "select * from scheduled_posts where id=$1::uuid",
+            post_id,
+        )
+    return _record_to_dict(row)
+
+
+async def set_scheduled_post_job_id(post_id: str, job_id: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            """
+            update scheduled_posts
+            set job_id=$2, updated_at=now()
+            where id=$1::uuid
+            """,
+            post_id,
+            job_id,
+        )
+    return res.endswith("1")
+
+
+async def claim_scheduled_post_by_id(post_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Atomically claim one scheduled post if it is pending and due.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            update scheduled_posts
+            set status='processing',
+                attempts=attempts + 1,
+                last_attempt_at=now(),
+                updated_at=now()
+            where id=$1::uuid
+              and status='pending'
+              and scheduled_for <= now()
+            returning *
+            """,
+            post_id,
+        )
+    return _record_to_dict(row)
+
+
+async def claim_next_due_scheduled_post() -> Optional[Dict[str, Any]]:
+    """
+    Atomically claims the oldest due pending post.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            with due as (
+              select id
+              from scheduled_posts
+              where status='pending'
+                and scheduled_for <= now()
+              order by scheduled_for asc
+              for update skip locked
+              limit 1
+            )
+            update scheduled_posts sp
+            set status='processing',
+                attempts=sp.attempts + 1,
+                last_attempt_at=now(),
+                updated_at=now()
+            from due
+            where sp.id = due.id
+            returning sp.*
+            """
+        )
+    return _record_to_dict(row)
+
+
+async def mark_scheduled_post_published(post_id: str, result: Dict[str, Any]) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            """
+            update scheduled_posts
+            set status='published',
+                result=$2::jsonb,
+                error=null,
+                published_at=now(),
+                updated_at=now()
+            where id=$1::uuid
+            """,
+            post_id,
+            json.dumps(result or {}),
+        )
+    return res.endswith("1")
+
+
+async def mark_scheduled_post_failed(post_id: str, error: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            """
+            update scheduled_posts
+            set status='failed',
+                error=$2,
+                updated_at=now()
+            where id=$1::uuid
+            """,
+            post_id,
+            (error or "Unknown error")[:2000],
+        )
+    return res.endswith("1")
+
+
 async def insert_media_asset(
     user_id: str,
     filename: str,
