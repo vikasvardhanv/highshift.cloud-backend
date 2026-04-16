@@ -118,6 +118,43 @@ async def init_postgres(database_url: str) -> bool:
                 except Exception as e:
                     print(f"✗ Failed to create table '{table_name}': {e}")
             
+            # Migrate missing columns for existing tables
+            migrations = [
+                ("users", "google_id", "add column if not exists google_id text"),
+                ("users", "api_key_hash", "add column if not exists api_key_hash text unique"),
+                ("users", "api_keys", "add column if not exists api_keys jsonb not null default '[]'::jsonb"),
+                ("users", "linked_accounts", "add column if not exists linked_accounts jsonb not null default '[]'::jsonb"),
+                ("users", "profiles", "add column if not exists profiles jsonb not null default '[]'::jsonb"),
+                ("users", "developer_keys", "add column if not exists developer_keys jsonb not null default '{}'::jsonb"),
+                ("users", "plan_tier", "add column if not exists plan_tier text not null default 'starter'"),
+                ("users", "max_profiles", "add column if not exists max_profiles integer not null default 50"),
+                ("users", "created_at", "add column if not exists created_at timestamptz not null default now()"),
+                ("users", "updated_at", "add column if not exists updated_at timestamptz not null default now()"),
+                ("oauth_states", "code_verifier", "add column if not exists code_verifier text"),
+                ("oauth_states", "extra_data", "add column if not exists extra_data jsonb not null default '{}'::jsonb"),
+                ("scheduled_posts", "job_id", "add column if not exists job_id text"),
+                ("scheduled_posts", "result", "add column if not exists result jsonb"),
+                ("scheduled_posts", "error", "add column if not exists error text"),
+                ("scheduled_posts", "attempts", "add column if not exists attempts integer not null default 0"),
+                ("scheduled_posts", "last_attempt_at", "add column if not exists last_attempt_at timestamptz"),
+                ("scheduled_posts", "published_at", "add column if not exists published_at timestamptz"),
+                ("activity_logs", "platform", "add column if not exists platform text"),
+                ("activity_logs", "meta", "add column if not exists meta jsonb"),
+                ("media_assets", "content_type", "add column if not exists content_type text"),
+                ("media_assets", "file_type", "add column if not exists file_type text"),
+                ("media_assets", "cloud_url", "add column if not exists cloud_url text"),
+                ("media_assets", "data_url", "add column if not exists data_url text"),
+                ("media_assets", "local_path", "add column if not exists local_path text"),
+                ("media_assets", "size_bytes", "add column if not exists size_bytes bigint"),
+            ]
+            
+            for table, col, alter_sql in migrations:
+                try:
+                    await conn.execute(f"alter table {table} {alter_sql};")
+                    print(f"✓ Migrated {table}.{col}")
+                except Exception as e:
+                    print(f"  - {table}.{col}: {e}")
+            
             # Verify tables exist
             result = await conn.fetch("""
                 select table_name from information_schema.tables 
