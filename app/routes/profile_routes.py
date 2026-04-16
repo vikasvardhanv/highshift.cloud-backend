@@ -1,76 +1,100 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
-from app.models.user import User, Profile
-from app.utils.auth import get_current_user
-from typing import List
+from app.utils.auth import get_current_user, AuthUser
+from app.db.postgres import fetch_user_by_id, update_user
+from typing import List, Optional
 import uuid
+import json
 
-async def ensure_db():
-    from main import ensure_beanie_initialized
-    ok = await ensure_beanie_initialized()
-    if not ok:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-
-router = APIRouter(prefix="/profiles", tags=["Profiles"], dependencies=[Depends(ensure_db)])
+router = APIRouter(prefix="/profiles", tags=["Profiles"])
 
 @router.get("")
-async def get_profiles(user: User = Depends(get_current_user)):
+async def get_profiles(user: AuthUser = Depends(get_current_user)):
     """Get all profiles for the current user, including their linked accounts."""
-    results = []
+    user_id = user.id
+    user_row = await fetch_user_by_id(user_id)
+    
+    if not user_row:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    profiles = user_row.get("profiles") or []
+    linked_accounts = user_row.get("linked_accounts") or []
     
     # Ensure user has at least one default profile if none exist
-    if not user.profiles:
-        default_profile = Profile(name="Default")
-        user.profiles = [default_profile]
+    if not profiles:
+        default_profile = {
+            "id": str(uuid.uuid4()),
+            "name": "Default",
+            "created_at": "2024-01-01T00:00:00"
+        }
+        
         # Assign existing accounts to this default profile if they have no profile_id
-        for acc in user.linked_accounts:
-            if not acc.profile_id:
-                acc.profile_id = default_profile.id
-        await user.save()
-
-    for profile in user.profiles:
+        for acc in linked_accounts:
+            if not acc.get("profileId"):
+                acc["profileId"] = default_profile["id"]
+        
+        profiles = [default_profile]
+        await update_user(user_id, {"profiles": profiles, "linked_accounts": linked_accounts})
+    
+    results = []
+    for profile in profiles:
+        profile_id = profile.get("id")
         # filter accounts for this profile
-        accounts = [acc for acc in user.linked_accounts if acc.profile_id == profile.id]
+        accounts = [acc for acc in linked_accounts if acc.get("profileId") == profile_id]
         results.append({
-            "id": profile.id,
-            "name": profile.name,
-            "created_at": profile.created_at,
+            "id": profile_id,
+            "name": profile.get("name"),
+            "created_at": profile.get("created_at"),
             "accounts": accounts
         })
     return {"profiles": results}
 
 @router.post("")
-async def create_profile(name: str = Body(..., embed=True), user: User = Depends(get_current_user)):
+async def create_profile(name: str = Body(..., embed=True), user: AuthUser = Depends(get_current_user)):
     """Create a new profile."""
+    user_id = user.id
+    user_row = await fetch_user_by_id(user_id)
+    
+    if not user_row:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    profiles = user_row.get("profiles") or []
+    
     # Check if name exists
-    if any(p.name == name for p in user.profiles):
+    if any(p.get("name") == name for p in profiles):
         raise HTTPException(status_code=400, detail="Profile with this name already exists")
     
-    # Check limits
-    # (Optional: Implement plan limits later)
-    
-    new_profile = Profile(name=name)
-    user.profiles.append(new_profile)
-    await user.save()
+    new_profile = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "created_at": "2024-01-01T00:00:00"
+    }
+    profiles.append(new_profile)
+    await update_user(user_id, {"profiles": profiles})
     
     return new_profile
 
 @router.delete("/{profile_id}")
-async def delete_profile(profile_id: str, user: User = Depends(get_current_user)):
+async def delete_profile(profile_id: str, user: AuthUser = Depends(get_current_user)):
     """Delete a profile and its associated accounts."""
+    user_id = user.id
+    user_row = await fetch_user_by_id(user_id)
+    
+    if not user_row:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    profiles = user_row.get("profiles") or []
+    linked_accounts = user_row.get("linked_accounts") or []
     
     # Check if profile exists
-    profile = next((p for p in user.profiles if p.id == profile_id), None)
+    profile = next((p for p in profiles if p.get("id") == profile_id), None)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-        
-    # Prevent deleting the last profile maybe? Or allow it and then they have 0 profiles. 
-    # Let's allow deleting any.
     
     # Remove accounts associated with this profile
-    user.linked_accounts = [acc for acc in user.linked_accounts if acc.profile_id != profile_id]
+    linked_accounts = [acc for acc in linked_accounts if acc.get("profileId") != profile_id]
     
     # Remove profile
-    user.profiles = [p for p in user.profiles if p.id != profile_id]
+    profiles = [p for p in profiles if p.get("id") != profile_id]
     
-    await user.save()
+    await update_user(user_id, {"profiles": profiles, "linked_accounts": linked_accounts})
     return {"message": "Profile deleted", "deleted_profile_id": profile_id}

@@ -6,13 +6,7 @@ from typing import List, Optional
 import datetime
 from collections import defaultdict
 
-async def ensure_db():
-    from main import ensure_beanie_initialized
-    ok = await ensure_beanie_initialized()
-    if not ok:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-
-router = APIRouter(prefix="/schedule", tags=["Schedule"], dependencies=[Depends(ensure_db)])
+router = APIRouter(prefix="/schedule", tags=["Schedule"])
 
 @router.get("")
 async def get_schedule(
