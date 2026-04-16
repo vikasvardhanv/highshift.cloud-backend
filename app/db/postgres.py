@@ -35,86 +35,97 @@ async def init_postgres(database_url: str) -> bool:
     try:
         _pool = await asyncpg.create_pool(pg_url, min_size=1, max_size=5, timeout=12)
         async with _pool.acquire() as conn:
+            # Enable UUID extension
             await conn.execute("create extension if not exists pgcrypto;")
-            await conn.execute(
-            """
-            create table if not exists users (
-              id uuid primary key default gen_random_uuid(),
-              email text unique,
-              password_hash text,
-              google_id text,
-              api_key_hash text unique,
-              api_keys jsonb not null default '[]'::jsonb,
-              linked_accounts jsonb not null default '[]'::jsonb,
-              profiles jsonb not null default '[]'::jsonb,
-              developer_keys jsonb not null default '{}'::jsonb,
-              plan_tier text not null default 'starter',
-              max_profiles integer not null default 50,
-              created_at timestamptz not null default now(),
-              updated_at timestamptz not null default now()
-            );
-            """
-            )
-            await conn.execute(
-            """
-            create table if not exists oauth_states (
-              state_id text primary key,
-              code_verifier text,
-              extra_data jsonb not null default '{}'::jsonb,
-              created_at timestamptz not null default now()
-            );
-            """
-            )
-            await conn.execute(
-            """
-            create table if not exists scheduled_posts (
-              id uuid primary key default gen_random_uuid(),
-              user_id uuid not null references users(id) on delete cascade,
-              accounts jsonb not null default '[]'::jsonb,
-              content text not null default '',
-              media jsonb not null default '[]'::jsonb,
-              scheduled_for timestamptz not null,
-              status text not null default 'pending',
-              job_id text,
-              result jsonb,
-              error text,
-              attempts integer not null default 0,
-              last_attempt_at timestamptz,
-              published_at timestamptz,
-              created_at timestamptz not null default now(),
-              updated_at timestamptz not null default now()
-            );
-            """
-            )
-            await conn.execute(
-            """
-            create table if not exists activity_logs (
-              id uuid primary key default gen_random_uuid(),
-              user_id uuid not null references users(id) on delete cascade,
-              title text not null,
-              platform text,
-              type text not null default 'info',
-              meta jsonb,
-              time timestamptz not null default now()
-            );
-            """
-            )
-            await conn.execute(
-            """
-            create table if not exists media_assets (
-              id uuid primary key default gen_random_uuid(),
-              user_id uuid not null references users(id) on delete cascade,
-              filename text,
-              content_type text,
-              file_type text,
-              cloud_url text,
-              data_url text,
-              local_path text,
-              size_bytes bigint,
-              created_at timestamptz not null default now()
-            );
-            """
-            )
+            
+            # Create tables with proper error handling
+            tables = [
+                ("users", """
+                create table if not exists users (
+                  id uuid primary key default gen_random_uuid(),
+                  email text unique,
+                  password_hash text,
+                  google_id text,
+                  api_key_hash text unique,
+                  api_keys jsonb not null default '[]'::jsonb,
+                  linked_accounts jsonb not null default '[]'::jsonb,
+                  profiles jsonb not null default '[]'::jsonb,
+                  developer_keys jsonb not null default '{}'::jsonb,
+                  plan_tier text not null default 'starter',
+                  max_profiles integer not null default 50,
+                  created_at timestamptz not null default now(),
+                  updated_at timestamptz not null default now()
+                );
+                """),
+                ("oauth_states", """
+                create table if not exists oauth_states (
+                  state_id text primary key,
+                  code_verifier text,
+                  extra_data jsonb not null default '{}'::jsonb,
+                  created_at timestamptz not null default now()
+                );
+                """),
+                ("scheduled_posts", """
+                create table if not exists scheduled_posts (
+                  id uuid primary key default gen_random_uuid(),
+                  user_id uuid not null references users(id) on delete cascade,
+                  accounts jsonb not null default '[]'::jsonb,
+                  content text not null default '',
+                  media jsonb not null default '[]'::jsonb,
+                  scheduled_for timestamptz not null,
+                  status text not null default 'pending',
+                  job_id text,
+                  result jsonb,
+                  error text,
+                  attempts integer not null default 0,
+                  last_attempt_at timestamptz,
+                  published_at timestamptz,
+                  created_at timestamptz not null default now(),
+                  updated_at timestamptz not null default now()
+                );
+                """),
+                ("activity_logs", """
+                create table if not exists activity_logs (
+                  id uuid primary key default gen_random_uuid(),
+                  user_id uuid not null references users(id) on delete cascade,
+                  title text not null,
+                  platform text,
+                  type text not null default 'info',
+                  meta jsonb,
+                  time timestamptz not null default now()
+                );
+                """),
+                ("media_assets", """
+                create table if not exists media_assets (
+                  id uuid primary key default gen_random_uuid(),
+                  user_id uuid not null references users(id) on delete cascade,
+                  filename text,
+                  content_type text,
+                  file_type text,
+                  cloud_url text,
+                  data_url text,
+                  local_path text,
+                  size_bytes bigint,
+                  created_at timestamptz not null default now()
+                );
+                """),
+            ]
+            
+            for table_name, create_sql in tables:
+                try:
+                    await conn.execute(create_sql)
+                    print(f"✓ Table '{table_name}' ready")
+                except Exception as e:
+                    print(f"✗ Failed to create table '{table_name}': {e}")
+            
+            # Verify tables exist
+            result = await conn.fetch("""
+                select table_name from information_schema.tables 
+                where table_schema = 'public' order by table_name;
+            """)
+            existing_tables = [r['table_name'] for r in result]
+            print(f"Database tables: {existing_tables}")
+            
     except Exception:
         if _pool:
             await _pool.close()
