@@ -6,6 +6,7 @@ from typing import Optional
 
 import httpx
 from fastapi import HTTPException
+from app.models.user import User
 
 from app.db.postgres import (
     delete_oauth_state,
