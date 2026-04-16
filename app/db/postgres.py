@@ -1,7 +1,7 @@
 import json
 import os
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import asyncpg
 
@@ -640,4 +640,166 @@ async def delete_media_asset(user_id: str, media_id: str) -> bool:
             media_id,
             user_id,
         )
+    return res.endswith("1")
+
+
+# Organization functions
+async def create_organization(name: str, slug: str, owner_id: str, settings: dict = None) -> Dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            insert into organizations (name, slug, owner_id, settings)
+            values ($1, $2, $3, $4)
+            returning *
+        """, name, slug, owner_id, json.dumps(settings or {}))
+    return _record_to_dict(row)
+
+async def list_organizations(user_id: str) -> List[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            select o.*, om.role as member_role
+            from organizations o
+            left join organization_members om on o.id = om.organization_id and om.user_id = $1
+            where o.owner_id = $1 or om.user_id = $1
+            order by o.created_at desc
+        """, user_id)
+    return [dict(r) for r in rows]
+
+async def get_organization(org_id: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("select * from organizations where id = $1", org_id)
+    return _record_to_dict(row)
+
+async def update_organization(org_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        cols = []
+        vals = [org_id]
+        idx = 2
+        for k, v in data.items():
+            cols.append(f"{k} = ${idx}")
+            vals.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
+            idx += 1
+        query = f"update organizations set {', '.join(cols)} where id = $1 returning *"
+        row = await conn.fetchrow(query, *vals)
+    return _record_to_dict(row)
+
+
+# Notification functions
+async def create_notification(user_id: str, title: str, message: str = None, type_: str = "info", org_id: str = None) -> Dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            insert into notifications (user_id, organization_id, title, message, type)
+            values ($1, $2, $3, $4, $5) returning *
+        """, user_id, org_id, title, message, type_)
+    return _record_to_dict(row)
+
+async def list_notifications(user_id: str, limit: int = 20, offset: int = 0, unread_only: bool = False) -> List[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        query = "select * from notifications where user_id = $1"
+        if unread_only:
+            query += " and is_read = false"
+        query += " order by created_at desc limit $2 offset $3"
+        rows = await conn.fetch(query, user_id, limit, offset)
+    return [dict(r) for r in rows]
+
+async def mark_notification_read(notification_id: str, user_id: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        res = await conn.execute("update notifications set is_read = true where id = $1 and user_id = $2", notification_id, user_id)
+    return res.endswith("1")
+
+async def get_unread_notification_count(user_id: str) -> int:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval("select count(*) from notifications where user_id = $1 and is_read = false", user_id)
+
+
+# Webhook functions
+async def create_webhook(user_id: str, name: str, url: str, events: list, secret: str = None) -> Dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            insert into webhooks (user_id, name, url, events, secret)
+            values ($1, $2, $3, $4, $5) returning *
+        """, user_id, name, url, json.dumps(events), secret)
+    return _record_to_dict(row)
+
+async def list_webhooks(user_id: str) -> List[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("select * from webhooks where user_id = $1 order by created_at desc", user_id)
+    return [dict(r) for r in rows]
+
+async def get_webhook(webhook_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("select * from webhooks where id = $1 and user_id = $2", webhook_id, user_id)
+    return _record_to_dict(row)
+
+async def update_webhook(webhook_id: str, user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        cols = []
+        vals = [webhook_id, user_id]
+        idx = 3
+        for k, v in data.items():
+            cols.append(f"{k} = ${idx}")
+            vals.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
+            idx += 1
+        query = f"update webhooks set {', '.join(cols)} where id = $1 and user_id = $2 returning *"
+        row = await conn.fetchrow(query, *vals)
+    return _record_to_dict(row)
+
+async def delete_webhook(webhook_id: str, user_id: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        res = await conn.execute("delete from webhooks where id = $1 and user_id = $2", webhook_id, user_id)
+    return res.endswith("1")
+
+
+# Autopost functions
+async def create_autopost_config(user_id: str, name: str, feed_url: str, platforms: list, post_template: str, is_active: bool = True) -> Dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            insert into autopost_configs (user_id, name, feed_url, platforms, post_template, is_active)
+            values ($1, $2, $3, $4, $5, $6) returning *
+        """, user_id, name, feed_url, json.dumps(platforms), post_template, is_active)
+    return _record_to_dict(row)
+
+async def list_autopost_configs(user_id: str) -> List[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("select * from autopost_configs where user_id = $1 order by created_at desc", user_id)
+    return [dict(r) for r in rows]
+
+async def get_autopost_config(config_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("select * from autopost_configs where id = $1 and user_id = $2", config_id, user_id)
+    return _record_to_dict(row)
+
+async def update_autopost_config(config_id: str, user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        cols = []
+        vals = [config_id, user_id]
+        idx = 3
+        for k, v in data.items():
+            cols.append(f"{k} = ${idx}")
+            vals.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
+            idx += 1
+        query = f"update autopost_configs set {', '.join(cols)} where id = $1 and user_id = $2 returning *"
+        row = await conn.fetchrow(query, *vals)
+    return _record_to_dict(row)
+
+async def delete_autopost_config(config_id: str, user_id: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        res = await conn.execute("delete from autopost_configs where id = $1 and user_id = $2", config_id, user_id)
     return res.endswith("1")
