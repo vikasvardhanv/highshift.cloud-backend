@@ -44,8 +44,11 @@ async def init_postgres(database_url: str) -> bool:
                 create table if not exists users (
                   id uuid primary key default gen_random_uuid(),
                   email text unique,
+                  full_name text,
+                  avatar_url text,
                   password_hash text,
                   google_id text,
+                  is_active boolean not null default true,
                   api_key_hash text unique,
                   api_keys jsonb not null default '[]'::jsonb,
                   linked_accounts jsonb not null default '[]'::jsonb,
@@ -53,8 +56,44 @@ async def init_postgres(database_url: str) -> bool:
                   developer_keys jsonb not null default '{}'::jsonb,
                   plan_tier text not null default 'starter',
                   max_profiles integer not null default 50,
+                  stripe_customer_id text,
+                  stripe_subscription_id text,
+                  subscription_status text,
+                  subscription_tier text,
+                  credits integer not null default 100,
                   created_at timestamptz not null default now(),
                   updated_at timestamptz not null default now()
+                );
+                """),
+                ("organizations", """
+                create table if not exists organizations (
+                  id uuid primary key default gen_random_uuid(),
+                  name text not null,
+                  slug text unique,
+                  logo text,
+                  owner_id uuid references users(id) on delete set null,
+                  settings jsonb not null default '{}'::jsonb,
+                  billing_email text,
+                  stripe_customer_id text,
+                  stripe_subscription_id text,
+                  subscription_tier text default 'free',
+                  subscription_status text,
+                  billing_cycle_start timestamptz,
+                  billing_cycle_end timestamptz,
+                  created_at timestamptz not null default now(),
+                  updated_at timestamptz not null default now()
+                );
+                """),
+                ("organization_members", """
+                create table if not exists organization_members (
+                  id uuid primary key default gen_random_uuid(),
+                  organization_id uuid references organizations(id) on delete cascade,
+                  user_id uuid references users(id) on delete cascade,
+                  role text not null default 'user',
+                  invited_by uuid references users(id),
+                  status text not null default 'active',
+                  created_at timestamptz not null default now(),
+                  unique(organization_id, user_id)
                 );
                 """),
                 ("oauth_states", """
@@ -69,6 +108,7 @@ async def init_postgres(database_url: str) -> bool:
                 create table if not exists scheduled_posts (
                   id uuid primary key default gen_random_uuid(),
                   user_id uuid not null references users(id) on delete cascade,
+                  organization_id uuid references organizations(id) on delete set null,
                   accounts jsonb not null default '[]'::jsonb,
                   content text not null default '',
                   media jsonb not null default '[]'::jsonb,
@@ -80,6 +120,7 @@ async def init_postgres(database_url: str) -> bool:
                   attempts integer not null default 0,
                   last_attempt_at timestamptz,
                   published_at timestamptz,
+                  tags jsonb not null default '[]'::jsonb,
                   created_at timestamptz not null default now(),
                   updated_at timestamptz not null default now()
                 );
@@ -87,7 +128,8 @@ async def init_postgres(database_url: str) -> bool:
                 ("activity_logs", """
                 create table if not exists activity_logs (
                   id uuid primary key default gen_random_uuid(),
-                  user_id uuid not null references users(id) on delete cascade,
+                  user_id uuid references users(id) on delete cascade,
+                  organization_id uuid references organizations(id) on delete set null,
                   title text not null,
                   platform text,
                   type text not null default 'info',
@@ -95,10 +137,54 @@ async def init_postgres(database_url: str) -> bool:
                   time timestamptz not null default now()
                 );
                 """),
+                ("webhooks", """
+                create table if not exists webhooks (
+                  id uuid primary key default gen_random_uuid(),
+                  user_id uuid references users(id) on delete cascade,
+                  organization_id uuid references organizations(id) on delete set null,
+                  name text not null,
+                  url text not null,
+                  events jsonb not null default '[]'::jsonb,
+                  secret text,
+                  is_active boolean not null default true,
+                  last_triggered_at timestamptz,
+                  created_at timestamptz not null default now(),
+                  updated_at timestamptz not null default now()
+                );
+                """),
+                ("notifications", """
+                create table if not exists notifications (
+                  id uuid primary key default gen_random_uuid(),
+                  user_id uuid references users(id) on delete cascade,
+                  organization_id uuid references organizations(id) on delete set null,
+                  title text not null,
+                  message text,
+                  type text not null default 'info',
+                  is_read boolean not null default false,
+                  link text,
+                  created_at timestamptz not null default now()
+                );
+                """),
+                ("autopost_configs", """
+                create table if not exists autopost_configs (
+                  id uuid primary key default gen_random_uuid(),
+                  user_id uuid references users(id) on delete cascade,
+                  organization_id uuid references organizations(id) on delete set null,
+                  name text not null,
+                  feed_url text not null,
+                  platforms jsonb not null default '[]'::jsonb,
+                  post_template text,
+                  is_active boolean not null default true,
+                  last_fetched_at timestamptz,
+                  created_at timestamptz not null default now(),
+                  updated_at timestamptz not null default now()
+                );
+                """),
                 ("media_assets", """
                 create table if not exists media_assets (
                   id uuid primary key default gen_random_uuid(),
-                  user_id uuid not null references users(id) on delete cascade,
+                  user_id uuid references users(id) on delete cascade,
+                  organization_id uuid references organizations(id) on delete set null,
                   filename text,
                   content_type text,
                   file_type text,
@@ -133,6 +219,11 @@ async def init_postgres(database_url: str) -> bool:
                 ("users", "max_profiles", "add column if not exists max_profiles integer not null default 50"),
                 ("users", "created_at", "add column if not exists created_at timestamptz not null default now()"),
                 ("users", "updated_at", "add column if not exists updated_at timestamptz not null default now()"),
+                ("users", "stripe_customer_id", "add column if not exists stripe_customer_id text"),
+                ("users", "stripe_subscription_id", "add column if not exists stripe_subscription_id text"),
+                ("users", "subscription_status", "add column if not exists subscription_status text"),
+                ("users", "subscription_tier", "add column if not exists subscription_tier text"),
+                ("users", "credits", "add column if not exists credits integer not null default 100"),
                 ("oauth_states", "code_verifier", "add column if not exists code_verifier text"),
                 ("oauth_states", "extra_data", "add column if not exists extra_data jsonb not null default '{}'::jsonb"),
                 ("scheduled_posts", "job_id", "add column if not exists job_id text"),
@@ -141,14 +232,18 @@ async def init_postgres(database_url: str) -> bool:
                 ("scheduled_posts", "attempts", "add column if not exists attempts integer not null default 0"),
                 ("scheduled_posts", "last_attempt_at", "add column if not exists last_attempt_at timestamptz"),
                 ("scheduled_posts", "published_at", "add column if not exists published_at timestamptz"),
+                ("scheduled_posts", "tags", "add column if not exists tags jsonb not null default '[]'::jsonb"),
+                ("scheduled_posts", "organization_id", "add column if not exists organization_id uuid"),
                 ("activity_logs", "platform", "add column if not exists platform text"),
                 ("activity_logs", "meta", "add column if not exists meta jsonb"),
+                ("activity_logs", "organization_id", "add column if not exists organization_id uuid"),
                 ("media_assets", "content_type", "add column if not exists content_type text"),
                 ("media_assets", "file_type", "add column if not exists file_type text"),
                 ("media_assets", "cloud_url", "add column if not exists cloud_url text"),
                 ("media_assets", "data_url", "add column if not exists data_url text"),
                 ("media_assets", "local_path", "add column if not exists local_path text"),
                 ("media_assets", "size_bytes", "add column if not exists size_bytes bigint"),
+                ("media_assets", "organization_id", "add column if not exists organization_id uuid"),
             ]
             
             for table, col, alter_sql in migrations:
