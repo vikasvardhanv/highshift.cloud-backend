@@ -1,5 +1,6 @@
 import hashlib
 import os
+import json
 from datetime import datetime, timedelta
 from typing import Optional
 from types import SimpleNamespace
@@ -11,6 +12,25 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.db.postgres import fetch_user_by_api_key_hash, fetch_user_by_id, update_user
+
+
+def _normalize_json_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return []
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict):
+            return [parsed]
+    return []
 
 
 class AuthUser(SimpleNamespace):
@@ -94,7 +114,9 @@ class AuthUser(SimpleNamespace):
 
 def _to_auth_user(row: dict) -> AuthUser:
     api_keys = []
-    for k in (row.get("api_keys") or []):
+    for k in _normalize_json_list(row.get("api_keys")):
+        if not isinstance(k, dict):
+            continue
         api_keys.append(
             SimpleNamespace(
                 id=k.get("id"),
@@ -106,7 +128,9 @@ def _to_auth_user(row: dict) -> AuthUser:
         )
 
     linked_accounts = []
-    for item in (row.get("linked_accounts") or []):
+    for item in _normalize_json_list(row.get("linked_accounts")):
+        if not isinstance(item, dict):
+            continue
         linked_accounts.append(
             SimpleNamespace(
                 platform=item.get("platform"),
@@ -136,7 +160,8 @@ def _to_auth_user(row: dict) -> AuthUser:
                 name=p.get("name"),
                 created_at=p.get("created_at"),
             )
-            for p in (row.get("profiles") or [])
+            for p in _normalize_json_list(row.get("profiles"))
+            if isinstance(p, dict)
         ],
         developer_keys=row.get("developer_keys") or {},
         plan_tier=row.get("plan_tier") or "starter",
@@ -205,9 +230,11 @@ async def get_current_user(
             user_row = await fetch_user_by_api_key_hash(hashed)
             if user_row:
                 # B2B Audit: update lastUsed in json list if matching nested API key hash
-                keys = user_row.get("api_keys") or []
+                keys = _normalize_json_list(user_row.get("api_keys"))
                 changed = False
                 for k in keys:
+                    if not isinstance(k, dict):
+                        continue
                     if k.get("keyHash") == hashed:
                         k["lastUsed"] = datetime.utcnow().isoformat()
                         changed = True
