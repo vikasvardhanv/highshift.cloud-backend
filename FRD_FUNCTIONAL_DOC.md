@@ -1,7 +1,9 @@
-# Highshift Functional Requirements Document (FRD)
+# Functional Requirements Document (FRD)
 
 ## 1. Objective
+
 Highshift is a social media automation platform that lets users:
+
 - Connect social accounts with OAuth.
 - Publish immediately to multiple platforms.
 - Schedule posts for future publishing.
@@ -9,10 +11,12 @@ Highshift is a social media automation platform that lets users:
 - Use AI-assisted content generation and instant-publish workflows.
 
 This FRD covers both:
+
 - `highshift.cloud-backend` (FastAPI)
 - `highshift.cloud-frontend` (React + Vite)
 
 ## 2. System Components
+
 - Frontend SPA (`highshift.cloud-frontend`)
   - User auth/session handling
   - Dashboard, scheduling, profiles, media, analytics, settings
@@ -30,6 +34,7 @@ This FRD covers both:
   - Optional: Temporal-based workflow execution (feature-flagged)
 
 ## 3. User Roles
+
 - End User
   - Creates account/login, links social accounts, posts/schedules content.
 - Developer/API User
@@ -40,22 +45,26 @@ This FRD covers both:
 ## 4. Core Functional Requirements
 
 ### FR-1 Authentication & Session
+
 - Support local registration/login.
 - Support OAuth connect flows for social platforms.
 - Support API-key and Bearer-token auth at backend.
 - `/auth/me` must return normalized user profile, linked accounts, plan, and keys.
 
 ### FR-2 Account Connections
+
 - Users can connect/disconnect platform accounts.
 - Linked account metadata should persist with platform/account IDs and encrypted tokens.
 - Multiple accounts per user are supported with profile grouping.
 
 ### FR-3 Publishing (Instant)
+
 - User selects one or more connected accounts.
 - Backend validates content/media against platform requirements.
 - Backend dispatches to platform adapters and returns per-platform status.
 
 ### FR-4 Scheduled Publishing
+
 - User creates scheduled post with future UTC datetime.
 - Scheduled posts persist with status lifecycle:
   - `pending -> processing -> published|failed|canceled`
@@ -63,39 +72,48 @@ This FRD covers both:
 - Cron endpoint supports minute-level trigger for due posts.
 
 ### FR-5 Media Management
+
 - Upload media files and store metadata.
 - Return URLs for posting and media library listing.
 - Support delete operation for user media assets.
 
 ### FR-6 AI Features
+
 - AI content generation endpoint for topic/platform/tone.
 - Instant publish workflow endpoint for prebuilt automation trigger.
 
 ### FR-7 Profiles & Organizations
+
 - CRUD profiles (logical grouping of linked accounts).
 - Organization listing/creation/update endpoints.
 
 ### FR-8 API Keys & Developer Access
+
 - Create/list/delete API keys.
 - Track key usage (`lastUsed`) and support developer keys.
 
 ### FR-9 Webhooks & Notifications
+
 - CRUD webhook endpoints.
 - Webhook test + logs retrieval endpoints.
 - Notification list/read/count endpoints.
 
 ### FR-10 Reliability & Operations
+
 - Health endpoint reports API + DB status.
 - CORS and error middleware should return structured failures.
 - Feature flags should allow running with/without Temporal.
 
 ## 5. API Surface (High-level)
+
 Implemented route groups in backend:
+
 - `/auth`, `/linked-accounts`, `/post`, `/schedule`, `/analytics`, `/ai`, `/brand`
 - `/profiles`, `/keys`, `/organizations`, `/notifications`, `/webhooks`, `/autopost`
 - `/activity`, `/history`, `/cron`, `/health`
 
 ## 6. Non-Functional Requirements
+
 - Security
   - Token encryption for social access/refresh tokens.
   - JWT/API-key verification for protected routes.
@@ -109,11 +127,13 @@ Implemented route groups in backend:
 ## 7. Environment & Deployment Requirements
 
 ### Backend required baseline
+
 - `DATABASE_URL` (Postgres recommended)
 - `JWT_SECRET`
 - Platform OAuth client credentials
 
 ### Optional Temporal (disabled by default)
+
 - `TEMPORAL_ENABLED=true|false`
 - `TEMPORAL_TARGET_HOST`
 - `TEMPORAL_NAMESPACE`
@@ -121,10 +141,12 @@ Implemented route groups in backend:
 - `TEMPORAL_API_KEY` (Temporal Cloud)
 
 ### Frontend
+
 - `VITE_API_URL`
 - `VITE_CLIENT_REDIRECT`
 
 ## 8. Acceptance Criteria
+
 - User can login and call `/auth/me` without 500 errors.
 - User can connect accounts and publish immediate post.
 - User can schedule post and see status transition through publish lifecycle.
