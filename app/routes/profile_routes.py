@@ -17,7 +17,18 @@ async def get_profiles(user: AuthUser = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="User not found")
     
     profiles = user_row.get("profiles") or []
+    if isinstance(profiles, str):
+        try:
+            profiles = json.loads(profiles)
+        except Exception:
+            profiles = []
+            
     linked_accounts = user_row.get("linked_accounts") or []
+    if isinstance(linked_accounts, str):
+        try:
+            linked_accounts = json.loads(linked_accounts)
+        except Exception:
+            linked_accounts = []
     
     # Ensure user has at least one default profile if none exist
     if not profiles:
@@ -37,9 +48,11 @@ async def get_profiles(user: AuthUser = Depends(get_current_user)):
     
     results = []
     for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
         profile_id = profile.get("id")
         # filter accounts for this profile
-        accounts = [acc for acc in linked_accounts if acc.get("profileId") == profile_id]
+        accounts = [acc for acc in linked_accounts if isinstance(acc, dict) and acc.get("profileId") == profile_id]
         results.append({
             "id": profile_id,
             "name": profile.get("name"),
@@ -60,13 +73,16 @@ async def create_profile(name: str = Body(..., embed=True), user: AuthUser = Dep
     profiles = user_row.get("profiles") or []
 
     if isinstance(profiles, str):
-        profiles = json.loads(profiles) if profiles else []
+        try:
+            profiles = json.loads(profiles) if profiles else []
+        except Exception:
+            profiles = []
 
     if not isinstance(profiles, list):
         profiles = []
     
     # Check if name exists
-    if any(p.get("name") == name for p in profiles):
+    if any(isinstance(p, dict) and p.get("name") == name for p in profiles):
         raise HTTPException(status_code=400, detail="Profile with this name already exists")
     
     new_profile = {
@@ -89,18 +105,29 @@ async def delete_profile(profile_id: str, user: AuthUser = Depends(get_current_u
         raise HTTPException(status_code=404, detail="User not found")
     
     profiles = user_row.get("profiles") or []
+    if isinstance(profiles, str):
+        try:
+            profiles = json.loads(profiles)
+        except Exception:
+            profiles = []
+            
     linked_accounts = user_row.get("linked_accounts") or []
+    if isinstance(linked_accounts, str):
+        try:
+            linked_accounts = json.loads(linked_accounts)
+        except Exception:
+            linked_accounts = []
     
     # Check if profile exists
-    profile = next((p for p in profiles if p.get("id") == profile_id), None)
+    profile = next((p for p in profiles if isinstance(p, dict) and p.get("id") == profile_id), None)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     
     # Remove accounts associated with this profile
-    linked_accounts = [acc for acc in linked_accounts if acc.get("profileId") != profile_id]
+    linked_accounts = [acc for acc in linked_accounts if isinstance(acc, dict) and acc.get("profileId") != profile_id]
     
     # Remove profile
-    profiles = [p for p in profiles if p.get("id") != profile_id]
+    profiles = [p for p in profiles if isinstance(p, dict) and p.get("id") != profile_id]
     
     await update_user(user_id, {"profiles": profiles, "linked_accounts": linked_accounts})
     return {"message": "Profile deleted", "deleted_profile_id": profile_id}
