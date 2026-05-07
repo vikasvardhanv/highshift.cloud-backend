@@ -58,6 +58,12 @@ async def create_profile(name: str = Body(..., embed=True), user: AuthUser = Dep
         raise HTTPException(status_code=404, detail="User not found")
     
     profiles = user_row.get("profiles") or []
+
+    if isinstance(profiles, str):
+        profiles = json.loads(profiles) if profiles else []
+
+    if not isinstance(profiles, list):
+        profiles = []
     
     # Check if name exists
     if any(p.get("name") == name for p in profiles):
