@@ -438,35 +438,32 @@ async def insert_user(data: Dict[str, Any]) -> Dict[str, Any]:
 async def update_user(user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            update users set
-              email=$2,
-              password_hash=$3,
-              google_id=$4,
-              api_key_hash=$5,
-              api_keys=$6::jsonb,
-              linked_accounts=$7::jsonb,
-              profiles=$8::jsonb,
-              developer_keys=$9::jsonb,
-              plan_tier=$10,
-              max_profiles=$11,
-              updated_at=now()
-            where id=$1::uuid
-            returning *
-            """,
-            user_id,
-            data.get("email"),
-            data.get("password_hash"),
-            data.get("google_id"),
-            data.get("api_key_hash"),
-            json.dumps(data.get("api_keys") or []),
-            json.dumps(data.get("linked_accounts") or []),
-            json.dumps(data.get("profiles") or []),
-            json.dumps(data.get("developer_keys") or {}),
-            data.get("plan_tier") or "starter",
-            int(data.get("max_profiles") or 50),
-        )
+        # Remove None values and protected fields so we never overwrite email/password with null
+        safe_data = {k: v for k, v in data.items() if v is not None and k not in ["email", "password_hash", "id"]}
+        
+        # If nothing to update, just return current user
+        if not safe_data:
+            row = await conn.fetchrow("select * from users where id=$1::uuid", user_id)
+            return _record_to_dict(row)
+        
+        # Build SET clause only for fields passed in
+        cols = []
+        vals = [user_id]
+        idx = 2
+        
+        for key, value in safe_data.items():
+            if isinstance(value, (dict, list)):
+                cols.append(f"{key}=${idx}::jsonb")
+                vals.append(json.dumps(value))
+            else:
+                cols.append(f"{key}=${idx}")
+                vals.append(value)
+            idx += 1
+        
+        cols.append("updated_at=now()")
+        
+        query = f"update users set {', '.join(cols)} where id=$1::uuid returning *"
+        row = await conn.fetchrow(query, *vals)
     return _record_to_dict(row)
 
 
