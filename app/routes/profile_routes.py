@@ -7,6 +7,63 @@ import json
 
 router = APIRouter(prefix="/profiles", tags=["Profiles"])
 
+
+def _decode_json_value(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _normalize_profile(profile):
+    profile = _decode_json_value(profile)
+    if isinstance(profile, dict):
+        profile_id = profile.get("id") or str(uuid.uuid4())
+        return {
+            **profile,
+            "id": str(profile_id),
+            "name": profile.get("name") or "Default",
+            "created_at": profile.get("created_at") or "2024-01-01T00:00:00",
+        }
+    if isinstance(profile, str) and profile.strip():
+        return {
+            "id": profile,
+            "name": profile,
+            "created_at": "2024-01-01T00:00:00",
+        }
+    return None
+
+
+def _normalize_account(account):
+    account = _decode_json_value(account)
+    if not isinstance(account, dict):
+        return None
+
+    normalized = dict(account)
+    profile_id = normalized.get("profileId") or normalized.get("profile_id")
+    if profile_id:
+        normalized["profileId"] = str(profile_id)
+    return normalized
+
+
+def _normalize_profiles(profiles):
+    return [
+        profile
+        for profile in (_normalize_profile(profile) for profile in (profiles or []))
+        if profile
+    ]
+
+
+def _normalize_accounts(accounts):
+    return [
+        account
+        for account in (_normalize_account(account) for account in (accounts or []))
+        if account
+    ]
+
+
 @router.get("")
 async def get_profiles(user: AuthUser = Depends(get_current_user)):
     """Get all profiles for the current user, including their linked accounts."""
@@ -16,8 +73,8 @@ async def get_profiles(user: AuthUser = Depends(get_current_user)):
     if not user_row:
         raise HTTPException(status_code=404, detail="User not found")
     
-    profiles = user_row.get("profiles") or []
-    linked_accounts = user_row.get("linked_accounts") or []
+    profiles = _normalize_profiles(user_row.get("profiles"))
+    linked_accounts = _normalize_accounts(user_row.get("linked_accounts"))
     
     # Ensure user has at least one default profile if none exist
     if not profiles:
@@ -57,7 +114,7 @@ async def create_profile(name: str = Body(..., embed=True), user: AuthUser = Dep
     if not user_row:
         raise HTTPException(status_code=404, detail="User not found")
     
-    profiles = user_row.get("profiles") or []
+    profiles = _normalize_profiles(user_row.get("profiles"))
     
     # Check if name exists
     if any(p.get("name") == name for p in profiles):
@@ -82,8 +139,8 @@ async def delete_profile(profile_id: str, user: AuthUser = Depends(get_current_u
     if not user_row:
         raise HTTPException(status_code=404, detail="User not found")
     
-    profiles = user_row.get("profiles") or []
-    linked_accounts = user_row.get("linked_accounts") or []
+    profiles = _normalize_profiles(user_row.get("profiles"))
+    linked_accounts = _normalize_accounts(user_row.get("linked_accounts"))
     
     # Check if profile exists
     profile = next((p for p in profiles if p.get("id") == profile_id), None)

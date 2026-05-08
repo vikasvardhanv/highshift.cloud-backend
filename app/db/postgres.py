@@ -438,6 +438,16 @@ async def insert_user(data: Dict[str, Any]) -> Dict[str, Any]:
 async def update_user(user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as conn:
+        current = await conn.fetchrow("select * from users where id=$1::uuid", user_id)
+        if not current:
+            return None
+        current_data = dict(current)
+
+        def value_for(key: str, column: str, default: Any = None) -> Any:
+            if key in data:
+                return data.get(key)
+            return current_data.get(column, default)
+
         row = await conn.fetchrow(
             """
             update users set
@@ -456,16 +466,16 @@ async def update_user(user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, 
             returning *
             """,
             user_id,
-            data.get("email"),
-            data.get("password_hash"),
-            data.get("google_id"),
-            data.get("api_key_hash"),
-            json.dumps(data.get("api_keys") or []),
-            json.dumps(data.get("linked_accounts") or []),
-            json.dumps(data.get("profiles") or []),
-            json.dumps(data.get("developer_keys") or {}),
-            data.get("plan_tier") or "starter",
-            int(data.get("max_profiles") or 50),
+            value_for("email", "email"),
+            value_for("password_hash", "password_hash"),
+            value_for("google_id", "google_id"),
+            value_for("api_key_hash", "api_key_hash"),
+            json.dumps(value_for("api_keys", "api_keys", []) or []),
+            json.dumps(value_for("linked_accounts", "linked_accounts", []) or []),
+            json.dumps(value_for("profiles", "profiles", []) or []),
+            json.dumps(value_for("developer_keys", "developer_keys", {}) or {}),
+            value_for("plan_tier", "plan_tier", "starter") or "starter",
+            int(value_for("max_profiles", "max_profiles", 50) or 50),
         )
     return _record_to_dict(row)
 
