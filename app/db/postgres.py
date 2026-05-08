@@ -438,45 +438,49 @@ async def insert_user(data: Dict[str, Any]) -> Dict[str, Any]:
 async def update_user(user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        current = await conn.fetchrow("select * from users where id=$1::uuid", user_id)
-        if not current:
-            return None
-        current_data = dict(current)
+        # Partial update only: omitted fields keep their current DB values.
+        allowed_columns = {
+            "email",
+            "password_hash",
+            "google_id",
+            "api_key_hash",
+            "api_keys",
+            "linked_accounts",
+            "profiles",
+            "developer_keys",
+            "plan_tier",
+            "max_profiles",
+        }
+        json_columns = {"api_keys", "linked_accounts", "profiles", "developer_keys"}
+        safe_data = {
+            key: value
+            for key, value in data.items()
+            if key in allowed_columns and value is not None
+        }
 
-        def value_for(key: str, column: str, default: Any = None) -> Any:
-            if key in data:
-                return data.get(key)
-            return current_data.get(column, default)
+        # If nothing to update, just return current user
+        if not safe_data:
+            row = await conn.fetchrow("select * from users where id=$1::uuid", user_id)
+            return _record_to_dict(row)
 
-        row = await conn.fetchrow(
-            """
-            update users set
-              email=$2,
-              password_hash=$3,
-              google_id=$4,
-              api_key_hash=$5,
-              api_keys=$6::jsonb,
-              linked_accounts=$7::jsonb,
-              profiles=$8::jsonb,
-              developer_keys=$9::jsonb,
-              plan_tier=$10,
-              max_profiles=$11,
-              updated_at=now()
-            where id=$1::uuid
-            returning *
-            """,
-            user_id,
-            value_for("email", "email"),
-            value_for("password_hash", "password_hash"),
-            value_for("google_id", "google_id"),
-            value_for("api_key_hash", "api_key_hash"),
-            json.dumps(value_for("api_keys", "api_keys", []) or []),
-            json.dumps(value_for("linked_accounts", "linked_accounts", []) or []),
-            json.dumps(value_for("profiles", "profiles", []) or []),
-            json.dumps(value_for("developer_keys", "developer_keys", {}) or {}),
-            value_for("plan_tier", "plan_tier", "starter") or "starter",
-            int(value_for("max_profiles", "max_profiles", 50) or 50),
-        )
+        # Build SET clause only for fields passed in
+        cols = []
+        vals = [user_id]
+        idx = 2
+
+        for key, value in safe_data.items():
+            if key in json_columns:
+                cols.append(f"{key}=${idx}::jsonb")
+                vals.append(json.dumps(value))
+            else:
+                cols.append(f"{key}=${idx}")
+                vals.append(value)
+            idx += 1
+
+        cols.append("updated_at=now()")
+
+        query = f"update users set {', '.join(cols)} where id=$1::uuid returning *"
+        row = await conn.fetchrow(query, *vals)
     return _record_to_dict(row)
 
 

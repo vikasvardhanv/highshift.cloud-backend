@@ -252,7 +252,7 @@ except Exception as e:
 
 @app.get("/health")
 async def health_check():
-    global db_initialized
+    #global db_initialized
     db_url = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")
     postgres_mode = is_postgres_url(db_url)
     try:
