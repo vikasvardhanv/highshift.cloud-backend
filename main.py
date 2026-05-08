@@ -128,11 +128,11 @@ env_origins = os.getenv("CORS_ORIGINS", "").split(",")
 origins = [o.strip().rstrip("/") for o in env_origins if o.strip()]
 origin_regex = os.getenv(
     "CORS_ORIGIN_REGEX",
-    r"^https://([a-z0-9-]+\.)*highshift\.cloud$|^https://highshift-cloud-frontend.*\.vercel\.app$|^http://(localhost|127\.0\.0\.1)(:\d+)?$",
+    r"^https://([a-z0-9-]+\.)*highshift\.cloud$|^https://highshift-cloud-frontend.*\.vercel\.app$",
 )
 origin_re = re.compile(origin_regex)
 
-# Explicitly add production and common dev domains
+# Explicitly add production domains
 production_domains = [
     "https://highshift.cloud",
     "https://www.highshift.cloud",
@@ -141,8 +141,6 @@ production_domains = [
     "https://socialraven.meganai.cloud",
     "https://www.socialraven.meganai.cloud",
     "https://socialraven.meganai.cloud.vercel.app",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
 ]
 for d in production_domains:
     normalized = d.rstrip("/")

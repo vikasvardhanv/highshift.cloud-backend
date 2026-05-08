@@ -43,7 +43,7 @@ def get_frontend_url() -> str:
     frontend_url = os.getenv("FRONTEND_URL")
     if not frontend_url:
         origins = os.getenv("CORS_ORIGINS", "").split(",")
-        frontend_url = origins[0] if origins and origins[0] else "http://localhost:5173"
+        frontend_url = origins[0] if origins and origins[0] else "https://highshift.cloud"
 
     # Legacy safety for prior deployments
     if "socialraven.meganai.cloud" in frontend_url and frontend_url.startswith("http://"):
@@ -99,15 +99,20 @@ def _split_scope_env(value: str, defaults: list[str]) -> list[str]:
 
 
 def _twitter_redirect_uri() -> str:
-    redirect_uri = os.getenv("TWITTER_REDIRECT_URI")
-    if redirect_uri:
-        return redirect_uri.strip()
+    configured = (os.getenv("TWITTER_REDIRECT_URI") or "").strip()
+    backend_url = (os.getenv("BACKEND_URL") or "").strip().rstrip("/")
+    backend_redirect_uri = f"{backend_url}/connect/twitter/callback" if backend_url else None
 
-    backend_url = os.getenv("BACKEND_URL")
-    if backend_url:
-        return f"{backend_url.rstrip('/')}/connect/twitter/callback"
+    if configured and "highshift-cloud-backend.vercel.app" not in configured:
+        return configured
+    if backend_redirect_uri:
+        return backend_redirect_uri
 
     raise HTTPException(status_code=500, detail="TWITTER_REDIRECT_URI not configured")
+
+
+def get_twitter_redirect_uri() -> str:
+    return _twitter_redirect_uri()
 
 
 async def register_local_user(email: str, password: str) -> dict:
@@ -190,7 +195,7 @@ def build_user_me_response(user: User) -> dict:
 
 def build_google_login_url() -> str:
     client_id = os.getenv("GOOGLE_CLIENT_ID") or os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
-    backend_url = os.getenv("BACKEND_URL", "http://localhost:3000")
+    backend_url = os.getenv("BACKEND_URL", "https://api.highshift.cloud")
     backend_redirect_uri = f"{backend_url}/auth/google/callback"
     state = str(uuid.uuid4())
     scope_str = "openid email profile"
@@ -204,7 +209,7 @@ def build_google_login_url() -> str:
 async def google_login_callback_redirect(code: str) -> str:
     client_id = os.getenv("GOOGLE_CLIENT_ID") or os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET") or os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET")
-    backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'http://localhost:3000')}/auth/google/callback"
+    backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'https://api.highshift.cloud')}/auth/google/callback"
     frontend_url = get_frontend_url()
 
     async with httpx.AsyncClient() as client:

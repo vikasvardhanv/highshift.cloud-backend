@@ -25,6 +25,7 @@ from app.services.auth_service import (
     build_user_me_response,
     get_frontend_url,
     get_platform_connect_payload,
+    get_twitter_redirect_uri,
     google_login_callback_redirect,
     login_local_user,
     parse_oauth_state_payload,
@@ -162,7 +163,7 @@ async def oauth_callback(
     # Priority:
     # 1. FRONTEND_URL env var (Explicit override)
     # 2. CORS_ORIGINS (Split by comma, take first)
-    # 3. Default to localhost
+    # 3. Default to production frontend
     
     frontend_url = get_frontend_url()
 
@@ -1148,7 +1149,7 @@ async def forgot_password(req: ForgotPasswordRequest):
     await user.save()
     
     # Construct Link
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    frontend_url = os.getenv("FRONTEND_URL", "https://highshift.cloud")
     reset_link = f"{frontend_url}/reset-password?token={reset_token}"
     
     # Send Email

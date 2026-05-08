@@ -34,7 +34,9 @@ async def get_temporal_client() -> Client:
     if _client:
         return _client
 
-    target_host = os.getenv("TEMPORAL_TARGET_HOST", "localhost:7233")
+    target_host = os.getenv("TEMPORAL_TARGET_HOST", "")
+    if not target_host:
+        raise RuntimeError("TEMPORAL_TARGET_HOST is not configured")
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
     api_key = os.getenv("TEMPORAL_API_KEY")
 

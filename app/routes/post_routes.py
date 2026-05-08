@@ -89,10 +89,9 @@ async def upload_and_post(
                 # Add to local paths for Twitter
                 local_paths.append(file_path)
                 
-                # Add to media URLs for others (Warning: Localhost URLs won't work for Insta/FB API)
-                # Assuming backend runs on port 3000 or similar. In prod, this should be the public domain.
+                # Add to media URLs for others; external APIs need absolute public URLs.
                 # Using relative path? APIs need absolute http/s.
-                domain = os.getenv("API_BASE_URL", "http://localhost:3000") 
+                domain = os.getenv("API_BASE_URL", "https://api.highshift.cloud")
                 public_url = f"{domain}/static/uploads/{filename}"
                 media.append(public_url)
                 

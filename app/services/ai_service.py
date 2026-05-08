@@ -1,7 +1,8 @@
 import os
 import json
 from typing import Optional
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from openai import AsyncOpenAI
 from app.models.brand_kit import BrandKit
 from app.utils.logger import logger
@@ -14,8 +15,7 @@ PROVIDER = "gemini" if GEMINI_API_KEY else ("grok" if GROK_API_KEY else "none")
 N8N_INSTANT_WEBHOOK_URL = os.getenv("N8N_INSTANT_WEBHOOK_URL", "https://wfig.app.n8n.cloud/form/1e3df4e4-a0fd-453e-9942-63ee710aeded")
 
 # Initialize Clients
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 grok_client = None
 if GROK_API_KEY:
@@ -34,10 +34,11 @@ async def detect_intent(prompt: str) -> str:
     system_instruction = "You are an intent classifier. Analyze the user's prompt and determine if they want 'text' (default), an 'image' (if they ask to generate, draw, create a picture/logo/photo), or a 'video' (if they ask for a video, clip, animation). Return ONLY a JSON object: {\"intent\": \"text\"| \"image\"| \"video\"}."
     
     try:
-        if PROVIDER == "gemini":
-            model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
-            response = await model.generate_content_async(
-                f"{system_instruction}\nUser Prompt: {prompt}"
+        if PROVIDER == "gemini" and gemini_client:
+            response = await gemini_client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=f"{system_instruction}\nUser Prompt: {prompt}",
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
             data = json.loads(response.text)
             return data.get("intent", "text")
@@ -156,9 +157,9 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
 
         if PROVIDER == "gemini":
             model_name = "gemini-1.5-flash"
-            model = genai.GenerativeModel(model_name)
-            response = await model.generate_content_async(
-                f"{system_prompt}\n\nTask: {user_prompt}"
+            response = await gemini_client.aio.models.generate_content(
+                model=model_name,
+                contents=f"{system_prompt}\n\nTask: {user_prompt}",
             )
             content = response.text.strip()
             # Usage tracking not always available in same structure, ignoring for now

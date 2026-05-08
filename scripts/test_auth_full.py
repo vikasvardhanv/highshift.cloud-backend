@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = "https://api.highshift.cloud"
 
 async def test_auth_flow():
     async with httpx.AsyncClient() as client:
