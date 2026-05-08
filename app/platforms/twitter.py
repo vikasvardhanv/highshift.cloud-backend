@@ -2,6 +2,7 @@ import httpx
 import hashlib
 import base64
 import os
+import urllib.parse
 from app.utils.logger import logger
 
 def generate_pkce_pair():
@@ -20,7 +21,7 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
         "code_challenge": code_challenge,
         "code_challenge_method": "S256"
     }
-    encoded_params = "&".join([f"{k}={v}" for k, v in params.items()])
+    encoded_params = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
     return f"https://twitter.com/i/oauth2/authorize?{encoded_params}"
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str, code_verifier: str):
