@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+import re
 import uuid
 from typing import Optional
 
@@ -58,6 +59,55 @@ def build_oauth_state_payload(user: Optional[object], profile_id: Optional[str])
         if profile_id:
             state_payload += f"_{profile_id}"
     return state_id, state_payload
+
+
+def parse_oauth_state_payload(state: Optional[str]) -> dict:
+    if not state:
+        return {"state_id": None, "user_id": None, "profile_id": None}
+
+    # Support underscore (current), hyphen (briefly used), and colon (legacy).
+    # UUIDs contain hyphens, so only split on hyphen when no safer delimiter exists.
+    if "_" in state:
+        state_parts = state.split("_")
+    elif ":" in state:
+        state_parts = state.split(":")
+    elif len(state) in {73, 110} and state[36] == "-":
+        state_parts = [state[:36], state[37:73]]
+        if len(state) == 110 and state[73] == "-":
+            state_parts.append(state[74:])
+    else:
+        state_parts = [state]
+
+    return {
+        "state_id": state_parts[0],
+        "user_id": state_parts[1] if len(state_parts) > 1 else None,
+        "profile_id": state_parts[2] if len(state_parts) > 2 else None,
+    }
+
+
+def _split_scope_env(value: str, defaults: list[str]) -> list[str]:
+    raw_scopes = re.split(r"[\s,]+", value or "")
+    scopes = [scope.strip() for scope in raw_scopes if scope and scope.strip()]
+    if not scopes:
+        scopes = defaults
+
+    deduped = []
+    for scope in scopes:
+        if scope not in deduped:
+            deduped.append(scope)
+    return deduped
+
+
+def _twitter_redirect_uri() -> str:
+    redirect_uri = os.getenv("TWITTER_REDIRECT_URI")
+    if redirect_uri:
+        return redirect_uri.strip()
+
+    backend_url = os.getenv("BACKEND_URL")
+    if backend_url:
+        return f"{backend_url.rstrip('/')}/connect/twitter/callback"
+
+    raise HTTPException(status_code=500, detail="TWITTER_REDIRECT_URI not configured")
 
 
 async def register_local_user(email: str, password: str) -> dict:
@@ -237,17 +287,34 @@ async def get_platform_connect_payload(
 
     if platform == "twitter":
         client_id = os.getenv("TWITTER_CLIENT_ID")
-        redirect_uri = os.getenv("TWITTER_REDIRECT_URI")
+        redirect_uri = _twitter_redirect_uri()
         if not client_id:
             raise HTTPException(status_code=500, detail="TWITTER_CLIENT_ID not configured")
-        if not redirect_uri:
-            raise HTTPException(status_code=500, detail="TWITTER_REDIRECT_URI not configured")
 
-        scopes = os.getenv(
-            "TWITTER_SCOPES", "tweet.read,tweet.write,users.read,offline.access"
-        ).split(",")
+        scopes = _split_scope_env(
+            os.getenv("TWITTER_SCOPES"),
+            ["tweet.read", "tweet.write", "users.read", "offline.access"],
+        )
         code_verifier, code_challenge = twitter.generate_pkce_pair()
-        await insert_oauth_state(state_id=state_id, code_verifier=code_verifier)
+        parsed_state = parse_oauth_state_payload(state_payload)
+        await insert_oauth_state(
+            state_id=state_id,
+            code_verifier=code_verifier,
+            extra_data={
+                "user_id": parsed_state.get("user_id"),
+                "profile_id": parsed_state.get("profile_id"),
+                "redirect_uri": redirect_uri,
+                "scopes": scopes,
+            },
+        )
+        logger.info(
+            "Twitter OAuth authorize prepared: redirect_uri=%s state_id=%s user_id=%s profile_id=%s scopes=%s",
+            redirect_uri,
+            state_id,
+            bool(parsed_state.get("user_id")),
+            parsed_state.get("profile_id"),
+            " ".join(scopes),
+        )
         return {
             "authUrl": await twitter.get_auth_url(
                 client_id, redirect_uri, state_payload, scopes, code_challenge

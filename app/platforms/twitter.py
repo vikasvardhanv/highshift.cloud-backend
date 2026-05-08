@@ -12,55 +12,67 @@ def generate_pkce_pair():
     return code_verifier, code_challenge
 
 async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: list, code_challenge: str):
+    clean_scopes = [scope.strip() for scope in scopes if scope and scope.strip()]
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "state": state,
         "response_type": "code",
-        "scope": " ".join(scopes),
+        "scope": " ".join(clean_scopes),
         "code_challenge": code_challenge,
         "code_challenge_method": "S256"
     }
     encoded_params = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
-    return f"https://twitter.com/i/oauth2/authorize?{encoded_params}"
+    return f"https://x.com/i/oauth2/authorize?{encoded_params}"
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str, code_verifier: str):
     async with httpx.AsyncClient() as client:
-        auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        data = {
+            "client_id": client_id,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "code": code,
+            "code_verifier": code_verifier
+        }
+        if client_secret:
+            auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+            headers["Authorization"] = f"Basic {auth}"
+
         res = await client.post(
-            "https://api.twitter.com/2/oauth2/token",
-            headers={
-                "Authorization": f"Basic {auth}",
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            data={
-                "client_id": client_id,
-                "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-                "code": code,
-                "code_verifier": code_verifier
-            }
+            "https://api.x.com/2/oauth2/token",
+            headers=headers,
+            data=data
         )
+        logger.info("Twitter token exchange status=%s", res.status_code)
         res.raise_for_status()
-        return res.json()
+        token_data = res.json()
+        logger.info(
+            "Twitter token exchange completed: access_token=%s refresh_token=%s expires_in=%s",
+            bool(token_data.get("access_token")),
+            bool(token_data.get("refresh_token")),
+            token_data.get("expires_in"),
+        )
+        return token_data
 
 async def refresh_access_token(client_id: str, client_secret: str, refresh_token: str):
     """Refresh an expired Twitter access token using the refresh token."""
     async with httpx.AsyncClient() as client:
-        auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        data = {
+            "client_id": client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token
+        }
+        if client_secret:
+            auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+            headers["Authorization"] = f"Basic {auth}"
         res = await client.post(
-            "https://api.twitter.com/2/oauth2/token",
-            headers={
-                "Authorization": f"Basic {auth}",
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token
-            }
+            "https://api.x.com/2/oauth2/token",
+            headers=headers,
+            data=data
         )
+        logger.info("Twitter token refresh status=%s", res.status_code)
         res.raise_for_status()
         return res.json()
 

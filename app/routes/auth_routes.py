@@ -4,6 +4,7 @@ import os
 import uuid
 import datetime
 import logging
+from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 from app.utils.auth import (
@@ -26,6 +27,7 @@ from app.services.auth_service import (
     get_platform_connect_payload,
     google_login_callback_redirect,
     login_local_user,
+    parse_oauth_state_payload,
     register_local_user,
 )
 
@@ -146,6 +148,7 @@ async def connect_bluesky(data: BlueskyLogin, user: User = Depends(get_current_u
 @router.get("/{platform}/callback")
 async def oauth_callback(
     platform: str,
+    request: Request,
     code: str = Query(None),
     state: str = Query(None),
     error: str = Query(None),
@@ -164,24 +167,38 @@ async def oauth_callback(
     frontend_url = get_frontend_url()
 
 
+    if platform == "twitter":
+        safe_query = dict(request.query_params)
+        if safe_query.get("code"):
+            safe_query["code"] = "<code-present>"
+        logger.info(
+            "Twitter OAuth callback received: url=%s",
+            request.url.replace_query_params(**safe_query),
+        )
+
     # Handle Cancellation / Errors
     if error:
-        return RedirectResponse(f"{frontend_url}/dashboard?error={error}")
+        return RedirectResponse(f"{frontend_url}/dashboard?{urlencode({'error': error})}")
     if denied:
         return RedirectResponse(f"{frontend_url}/dashboard?error=access_denied")
     if not code:
          return RedirectResponse(f"{frontend_url}/dashboard?error=no_code_provided")
-         
-    # Support underscore (new), hyphen (briefly used), and colon (legacy)
-    if "_" in state:
-        state_parts = state.split("_")
-    elif "-" in state:
-        state_parts = state.split("-")
-    else:
-        state_parts = state.split(":")
-    state_id = state_parts[0]
-    user_id_from_state = state_parts[1] if len(state_parts) > 1 else None
-    profile_id_from_state = state_parts[2] if len(state_parts) > 2 else None
+
+    parsed_state = parse_oauth_state_payload(state)
+    state_id = parsed_state.get("state_id")
+    user_id_from_state = parsed_state.get("user_id")
+    profile_id_from_state = parsed_state.get("profile_id")
+
+    if platform == "twitter":
+        logger.info(
+            "Twitter OAuth state parsed: state_id=%s user_id=%s profile_id=%s",
+            state_id,
+            bool(user_id_from_state),
+            profile_id_from_state,
+        )
+
+    if not state_id:
+        return RedirectResponse(f"{frontend_url}/dashboard?error=invalid_state")
     
     try:
         if platform == "twitter":
@@ -189,12 +206,24 @@ async def oauth_callback(
             oauth_data = await OAuthState.find_one({"state_id": state_id})
             if not oauth_data:
                 raise HTTPException(status_code=400, detail="Invalid or expired state")
+
+            oauth_extra = oauth_data.extra_data or {}
+            user_id_from_state = oauth_extra.get("user_id") or user_id_from_state
+            profile_id_from_state = oauth_extra.get("profile_id") or profile_id_from_state
+            redirect_uri = oauth_extra.get("redirect_uri") or os.getenv("TWITTER_REDIRECT_URI")
+            logger.info(
+                "Twitter OAuth stored state recovered: state_id=%s user_id=%s profile_id=%s redirect_uri=%s",
+                state_id,
+                bool(user_id_from_state),
+                profile_id_from_state,
+                redirect_uri,
+            )
             
             # 2. Exchange code for token
             token_data = await twitter.exchange_code(
                 client_id=os.getenv("TWITTER_CLIENT_ID"),
                 client_secret=os.getenv("TWITTER_CLIENT_SECRET"),
-                redirect_uri=os.getenv("TWITTER_REDIRECT_URI"),
+                redirect_uri=redirect_uri,
                 code=code,
                 code_verifier=oauth_data.code_verifier
             )
@@ -268,11 +297,17 @@ async def oauth_callback(
             jwt_token = create_access_token(data={"sub": str(user.id)})
 
             # 6. Redirect to frontend with data
-            redirect_params = f"platform=twitter&accountId={account_id}&token={jwt_token}"
+            redirect_data = {
+                "platform": "twitter",
+                "accountId": account_id,
+                "token": jwt_token,
+            }
+            if profile_id_from_state:
+                redirect_data["profileId"] = profile_id_from_state
             if api_key_to_return:
-                redirect_params += f"&apiKey={api_key_to_return}"
+                redirect_data["apiKey"] = api_key_to_return
             
-            return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
+            return RedirectResponse(url=f"{frontend_url}/auth/callback?{urlencode(redirect_data)}")
 
         # Fallback for other platforms (similar logic needed)
         if platform == "facebook":
@@ -1072,13 +1107,14 @@ connect_router = APIRouter(prefix="/connect", tags=["Connect Alias"], dependenci
 @connect_router.get("/{platform}/callback")
 async def connect_oauth_callback(
     platform: str, 
+    request: Request,
     code: str = Query(None), 
     state: str = Query(None),
     error: str = Query(None),
     denied: str = Query(None)
 ):
     """Alias for /auth/{platform}/callback - forwards to main oauth_callback."""
-    return await oauth_callback(platform, code, state, error, denied)
+    return await oauth_callback(platform, request, code, state, error, denied)
 
 
 # ============ Password Reset Endpoints ============
