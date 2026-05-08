@@ -98,15 +98,18 @@ def _split_scope_env(value: str, defaults: list[str]) -> list[str]:
     return deduped
 
 
-def _twitter_redirect_uri() -> str:
+def _twitter_redirect_uri(default_redirect_uri: Optional[str] = None) -> str:
     configured = (os.getenv("TWITTER_REDIRECT_URI") or "").strip()
     backend_url = (os.getenv("BACKEND_URL") or "").strip().rstrip("/")
     backend_redirect_uri = f"{backend_url}/connect/twitter/callback" if backend_url else None
 
-    if configured and "highshift-cloud-backend.vercel.app" not in configured:
+    if configured:
         return configured
     if backend_redirect_uri:
         return backend_redirect_uri
+
+    if default_redirect_uri:
+        return default_redirect_uri
 
     raise HTTPException(status_code=500, detail="TWITTER_REDIRECT_URI not configured")
 
@@ -272,6 +275,7 @@ async def get_platform_connect_payload(
     state_id: str,
     state_payload: str,
     instance_url: Optional[str] = None,
+    default_redirect_uri: Optional[str] = None,
 ) -> dict:
     if platform == "instagram":
         client_id = os.getenv("FACEBOOK_APP_ID")
@@ -292,7 +296,7 @@ async def get_platform_connect_payload(
 
     if platform == "twitter":
         client_id = os.getenv("TWITTER_CLIENT_ID")
-        redirect_uri = _twitter_redirect_uri()
+        redirect_uri = _twitter_redirect_uri(default_redirect_uri)
         if not client_id:
             raise HTTPException(status_code=500, detail="TWITTER_CLIENT_ID not configured")
 

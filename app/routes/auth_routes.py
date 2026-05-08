@@ -79,6 +79,7 @@ async def google_callback(code: str, state: str):
 @router.get("/connect/{platform}")
 async def connect_platform(
     platform: str, 
+    request: Request,
     profile_id: str = Query(None), # Add profile_id support
     instance_url: str = Query(None),
     user: User = Depends(get_optional_user)
@@ -93,6 +94,7 @@ async def connect_platform(
         state_id=state_id,
         state_payload=state_payload,
         instance_url=instance_url,
+        default_redirect_uri=f"{str(request.base_url).rstrip('/')}/connect/{platform}/callback",
     )
 
 class BlueskyLogin(BaseModel):
