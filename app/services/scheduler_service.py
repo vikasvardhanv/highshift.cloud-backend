@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
+from app.db.postgres import is_postgres_url
 from app.models.activity import ActivityLog
 from app.services.publishing_service import publish_content
 from app.services.workflow_service import post_workflow_service
@@ -39,6 +41,15 @@ class BackgroundScheduler:
         """
         Atomically claims due posts and publishes them.
         """
+        db_url = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")
+        if is_postgres_url(db_url):
+            from app.services.postgres_scheduler_service import process_due_posts
+
+            stats = await process_due_posts(limit=50)
+            if stats["processed"]:
+                logger.info("Postgres scheduler cycle complete: %s", stats)
+            return
+
         processed = 0
         while True:
             post = await post_workflow_service.claim_next_due_post()
