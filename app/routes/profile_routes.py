@@ -48,10 +48,21 @@ def _normalize_account(account):
     return normalized
 
 
+def _as_list(value):
+    value = _decode_json_value(value)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    return [value]
+
+
 def _normalize_profiles(profiles):
     return [
         profile
-        for profile in (_normalize_profile(profile) for profile in (profiles or []))
+        for profile in (_normalize_profile(profile) for profile in _as_list(profiles))
         if profile
     ]
 
@@ -59,7 +70,7 @@ def _normalize_profiles(profiles):
 def _normalize_accounts(accounts):
     return [
         account
-        for account in (_normalize_account(account) for account in (accounts or []))
+        for account in (_normalize_account(account) for account in _as_list(accounts))
         if account
     ]
 
@@ -73,8 +84,11 @@ async def get_profiles(user: AuthUser = Depends(get_current_user)):
     if not user_row:
         raise HTTPException(status_code=404, detail="User not found")
     
-    profiles = _normalize_profiles(user_row.get("profiles"))
-    linked_accounts = _normalize_accounts(user_row.get("linked_accounts"))
+    raw_profiles = user_row.get("profiles")
+    raw_linked_accounts = user_row.get("linked_accounts")
+    profiles = _normalize_profiles(raw_profiles)
+    linked_accounts = _normalize_accounts(raw_linked_accounts)
+    should_update_user = raw_profiles != profiles or raw_linked_accounts != linked_accounts
     
     # Ensure user has at least one default profile if none exist
     if not profiles:
@@ -90,6 +104,9 @@ async def get_profiles(user: AuthUser = Depends(get_current_user)):
                 acc["profileId"] = default_profile["id"]
         
         profiles = [default_profile]
+        should_update_user = True
+
+    if should_update_user:
         await update_user(user_id, {"profiles": profiles, "linked_accounts": linked_accounts})
     
     results = []
