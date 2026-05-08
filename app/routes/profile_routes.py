@@ -8,6 +8,9 @@ import json
 router = APIRouter(prefix="/profiles", tags=["Profiles"])
 
 
+DEFAULT_CREATED_AT = "2024-01-01T00:00:00"
+
+
 def _decode_json_value(value):
     if isinstance(value, str):
         try:
@@ -21,19 +24,36 @@ def _normalize_profile(profile):
     profile = _decode_json_value(profile)
     if isinstance(profile, dict):
         profile_id = profile.get("id") or str(uuid.uuid4())
+        name = profile.get("name") or "Default"
+        created_at = profile.get("created_at") or DEFAULT_CREATED_AT
+        if _is_malformed_character_profile(profile_id, name, created_at):
+            return None
         return {
             **profile,
             "id": str(profile_id),
-            "name": profile.get("name") or "Default",
-            "created_at": profile.get("created_at") or "2024-01-01T00:00:00",
+            "name": name,
+            "created_at": created_at,
         }
     if isinstance(profile, str) and profile.strip():
+        if len(profile.strip()) == 1:
+            return None
         return {
             "id": profile,
             "name": profile,
-            "created_at": "2024-01-01T00:00:00",
+            "created_at": DEFAULT_CREATED_AT,
         }
     return None
+
+
+def _is_malformed_character_profile(profile_id, name, created_at):
+    return (
+        isinstance(profile_id, str)
+        and isinstance(name, str)
+        and len(profile_id) == 1
+        and len(name) == 1
+        and profile_id == name
+        and created_at == DEFAULT_CREATED_AT
+    )
 
 
 def _normalize_account(account):
@@ -95,7 +115,7 @@ async def get_profiles(user: AuthUser = Depends(get_current_user)):
         default_profile = {
             "id": str(uuid.uuid4()),
             "name": "Default",
-            "created_at": "2024-01-01T00:00:00"
+            "created_at": DEFAULT_CREATED_AT
         }
         
         # Assign existing accounts to this default profile if they have no profile_id
@@ -140,7 +160,7 @@ async def create_profile(name: str = Body(..., embed=True), user: AuthUser = Dep
     new_profile = {
         "id": str(uuid.uuid4()),
         "name": name,
-        "created_at": "2024-01-01T00:00:00"
+        "created_at": DEFAULT_CREATED_AT
     }
     profiles.append(new_profile)
     await update_user(user_id, {"profiles": profiles})
