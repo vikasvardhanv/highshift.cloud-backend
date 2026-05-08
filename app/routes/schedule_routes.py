@@ -141,6 +141,8 @@ async def get_schedule_calendar(
                     if len(post.get("content", "")) > 50
                     else post.get("content", "")
                 ),
+                "scheduledFor": post["scheduled_for"].isoformat(),
+                "scheduled_for": post["scheduled_for"].isoformat(),
                 "time": post["scheduled_for"].isoformat(),
                 "platforms": [
                     acc.get("platform") for acc in (post.get("accounts") or [])
