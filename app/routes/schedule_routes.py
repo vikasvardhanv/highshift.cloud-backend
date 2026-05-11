@@ -1,16 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from app.utils.auth import AuthUser
 from app.utils.auth import get_current_user
-from app.db.postgres import create_scheduled_post, list_scheduled_posts, cancel_scheduled_post, insert_activity
-from app.temporal.scheduler import schedule_post_workflow
-from typing import List, Optional
+from app.db.postgres import create_scheduled_post, list_scheduled_posts, cancel_scheduled_post
 import datetime
-from collections import defaultdict
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/schedule", tags=["Schedule"])
+
+
+def _iso(value):
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 @router.get("")
 async def get_schedule(
@@ -24,8 +25,8 @@ async def get_schedule(
                 "content": post.get("content", ""),
                 "media": post.get("media") or [],
                 "status": post.get("status"),
-                "scheduledFor": post["scheduled_for"].isoformat(),
-                "scheduled_for": post["scheduled_for"].isoformat(),
+                "scheduledFor": _iso(post["scheduled_for"]),
+                "scheduled_for": _iso(post["scheduled_for"]),
                 "accounts": [
                     {"platform": a.get("platform"), "accountId": a.get("accountId")}
                     for a in (post.get("accounts") or [])
@@ -90,35 +91,16 @@ async def create_schedule(
         )
         raise HTTPException(status_code=500, detail="Failed to schedule post")
 
-    temporal_job_id = None
-    try:
-        temporal_job_id = await schedule_post_workflow(str(post["id"]), dt)
-    except Exception as e:
-        # Keep API availability; cron/APScheduler fallback can still process pending posts.
-        logger.error("Failed to schedule Temporal workflow for post %s: %s", post["id"], e, exc_info=True)
-
-    # Log activity
-    try:
-        await insert_activity(
-            user_id=str(user.id),
-            title=f"Scheduled a post for {dt.strftime('%Y-%m-%d %H:%M')}",
-            type_="success",
-            platform="System",
-            meta={"postId": str(post["id"])},
-        )
-    except Exception as e:
-        logger.error("Failed to log scheduled post activity for post %s: %s", post["id"], e, exc_info=True)
-    
     return {
         "success": True,
         "post": {
             "id": str(post["id"]),
             "content": post.get("content", ""),
             "status": post.get("status"),
-            "scheduledFor": post["scheduled_for"].isoformat(),
+            "scheduledFor": _iso(post["scheduled_for"]),
             "media": post.get("media") or [],
             "accounts": accounts,
-            "jobId": temporal_job_id or post.get("job_id"),
+            "jobId": post.get("job_id"),
         },
     }
 
@@ -157,9 +139,9 @@ async def get_schedule_calendar(
                     if len(post.get("content", "")) > 50
                     else post.get("content", "")
                 ),
-                "scheduledFor": post["scheduled_for"].isoformat(),
-                "scheduled_for": post["scheduled_for"].isoformat(),
-                "time": post["scheduled_for"].isoformat(),
+                "scheduledFor": _iso(post["scheduled_for"]),
+                "scheduled_for": _iso(post["scheduled_for"]),
+                "time": _iso(post["scheduled_for"]),
                 "platforms": [
                     acc.get("platform") for acc in (post.get("accounts") or [])
                 ],

@@ -21,9 +21,7 @@ def verify_cron_secret(request: Request):
     
     return False
 
-@router.post("/publish-scheduled")
-@router.get("/publish-scheduled")  # GET also works for Vercel Cron
-async def publish_scheduled_posts(request: Request):
+async def _process_scheduled_posts(request: Request):
     """
     Process and publish any due scheduled posts.
     Called by Vercel Cron every minute.
@@ -45,3 +43,15 @@ async def publish_scheduled_posts(request: Request):
         "message": "Scheduled posts check completed",
         "stats": stats,
     }
+
+
+@router.post("/process-scheduled-posts")
+@router.get("/process-scheduled-posts")
+async def process_scheduled_posts(request: Request):
+    return await _process_scheduled_posts(request)
+
+
+@router.post("/publish-scheduled")
+@router.get("/publish-scheduled")  # GET also works for Vercel Cron
+async def publish_scheduled_posts(request: Request):
+    return await _process_scheduled_posts(request)
