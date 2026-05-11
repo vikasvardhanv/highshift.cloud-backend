@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 import asyncpg
@@ -22,6 +23,16 @@ _JSON_COLUMNS = {
     "events",
     "platforms",
 }
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, default=_json_default)
 
 
 def _normalize_pg_url(url: str) -> str:
@@ -381,11 +392,11 @@ async def insert_user(data: Dict[str, Any]) -> Dict[str, Any]:
     password_hash = data.get("password_hash")
     google_id = data.get("google_id")
     api_key_hash = data.get("api_key_hash")
-    api_keys = json.dumps(data.get("api_keys") or [])
-    linked_accounts = json.dumps(data.get("linked_accounts") or [])
-    profiles = json.dumps(data.get("profiles") or [])
-    developer_keys = json.dumps(data.get("developer_keys") or {})
-    brand_kit = json.dumps(data.get("brand_kit") or {})
+    api_keys = _json_dumps(data.get("api_keys") or [])
+    linked_accounts = _json_dumps(data.get("linked_accounts") or [])
+    profiles = _json_dumps(data.get("profiles") or [])
+    developer_keys = _json_dumps(data.get("developer_keys") or {})
+    brand_kit = _json_dumps(data.get("brand_kit") or {})
     plan_tier = data.get("plan_tier") or "starter"
     max_profiles = int(data.get("max_profiles") or 50)
     full_name = data.get("email", "").split("@")[0] if email else "User"
@@ -502,7 +513,7 @@ async def update_user(user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, 
         for key, value in safe_data.items():
             if key in json_columns:
                 cols.append(f"{key}=${idx}::jsonb")
-                vals.append(json.dumps(value))
+                vals.append(_json_dumps(value))
             else:
                 cols.append(f"{key}=${idx}")
                 vals.append(value)
@@ -531,7 +542,7 @@ async def insert_oauth_state(
             """,
             state_id,
             code_verifier,
-            json.dumps(extra_data or {}),
+            _json_dumps(extra_data or {}),
         )
 
 
@@ -566,7 +577,7 @@ async def insert_activity(
             title,
             platform,
             type_,
-            json.dumps(meta or {}),
+            _json_dumps(meta or {}),
         )
 
 
@@ -598,9 +609,9 @@ async def create_scheduled_post(
             """,
             user_id,
             content or "",
-            json.dumps(accounts or []),
+            _json_dumps(accounts or []),
             scheduled_for_iso,
-            json.dumps(media or []),
+            _json_dumps(media or []),
         )
     return dict(row)
 
@@ -722,7 +733,7 @@ async def mark_scheduled_post_published(post_id: str, result: Dict[str, Any]) ->
             where id=$1::uuid
             """,
             post_id,
-            json.dumps(result or {}),
+            _json_dumps(result or {}),
         )
     return res.endswith("1")
 
@@ -810,7 +821,7 @@ async def create_organization(name: str, slug: str, owner_id: str, settings: dic
             insert into organizations (name, slug, owner_id, settings)
             values ($1, $2, $3, $4)
             returning *
-        """, name, slug, owner_id, json.dumps(settings or {}))
+        """, name, slug, owner_id, _json_dumps(settings or {}))
     return _record_to_dict(row)
 
 async def list_organizations(user_id: str) -> List[Dict[str, Any]]:
@@ -839,7 +850,7 @@ async def update_organization(org_id: str, data: Dict[str, Any]) -> Optional[Dic
         idx = 2
         for k, v in data.items():
             cols.append(f"{k} = ${idx}")
-            vals.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
+            vals.append(_json_dumps(v) if isinstance(v, (dict, list)) else v)
             idx += 1
         query = f"update organizations set {', '.join(cols)} where id = $1 returning *"
         row = await conn.fetchrow(query, *vals)
@@ -885,7 +896,7 @@ async def create_webhook(user_id: str, name: str, url: str, events: list, secret
         row = await conn.fetchrow("""
             insert into webhooks (user_id, name, url, events, secret)
             values ($1, $2, $3, $4, $5) returning *
-        """, user_id, name, url, json.dumps(events), secret)
+        """, user_id, name, url, _json_dumps(events), secret)
     return _record_to_dict(row)
 
 async def list_webhooks(user_id: str) -> List[Dict[str, Any]]:
@@ -908,7 +919,7 @@ async def update_webhook(webhook_id: str, user_id: str, data: Dict[str, Any]) ->
         idx = 3
         for k, v in data.items():
             cols.append(f"{k} = ${idx}")
-            vals.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
+            vals.append(_json_dumps(v) if isinstance(v, (dict, list)) else v)
             idx += 1
         query = f"update webhooks set {', '.join(cols)} where id = $1 and user_id = $2 returning *"
         row = await conn.fetchrow(query, *vals)
@@ -928,7 +939,7 @@ async def create_autopost_config(user_id: str, name: str, feed_url: str, platfor
         row = await conn.fetchrow("""
             insert into autopost_configs (user_id, name, feed_url, platforms, post_template, is_active)
             values ($1, $2, $3, $4, $5, $6) returning *
-        """, user_id, name, feed_url, json.dumps(platforms), post_template, is_active)
+        """, user_id, name, feed_url, _json_dumps(platforms), post_template, is_active)
     return _record_to_dict(row)
 
 async def list_autopost_configs(user_id: str) -> List[Dict[str, Any]]:
@@ -951,7 +962,7 @@ async def update_autopost_config(config_id: str, user_id: str, data: Dict[str, A
         idx = 3
         for k, v in data.items():
             cols.append(f"{k} = ${idx}")
-            vals.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
+            vals.append(_json_dumps(v) if isinstance(v, (dict, list)) else v)
             idx += 1
         query = f"update autopost_configs set {', '.join(cols)} where id = $1 and user_id = $2 returning *"
         row = await conn.fetchrow(query, *vals)
