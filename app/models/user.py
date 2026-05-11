@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import json
 import logging
@@ -42,6 +42,19 @@ def _normalize_json_value(value: Any, target_type: str) -> Any:
     
     return value
 
+
+def _normalize_datetime(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 class LinkedAccount(BaseModel):
     platform: str
     account_id: str = Field(alias="accountId")
@@ -57,6 +70,11 @@ class LinkedAccount(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     profile_id: Optional[str] = Field(None, alias="profileId") # ID of the Profile this account belongs to
 
+    @field_validator("expires_at", "created_at", "updated_at", mode="before")
+    @classmethod
+    def normalize_datetimes(cls, value: Any) -> Any:
+        return _normalize_datetime(value)
+
     class Settings:
         name = "linked_accounts"
 
@@ -67,11 +85,21 @@ class ApiKey(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_used: Optional[datetime] = Field(None, alias="lastUsed")
 
+    @field_validator("created_at", "last_used", mode="before")
+    @classmethod
+    def normalize_datetimes(cls, value: Any) -> Any:
+        return _normalize_datetime(value)
+
 class Profile(BaseModel):
     """A named profile to group social accounts (e.g., 'business', 'personal')."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def normalize_datetimes(cls, value: Any) -> Any:
+        return _normalize_datetime(value)
 
 
 def _coerce_model_list(values: Any, model_cls: type[BaseModel]) -> list:
@@ -219,9 +247,9 @@ class User(Document):
                 "password_hash": self.password_hash,
                 "google_id": self.google_id,
                 "api_key_hash": self.api_key_hash,
-                "api_keys": [k.model_dump(by_alias=True) for k in (self.api_keys or [])],
-                "linked_accounts": [a.model_dump(by_alias=True) for a in (self.linked_accounts or [])],
-                "profiles": [p.model_dump(by_alias=True) for p in (self.profiles or [])],
+                "api_keys": [k.model_dump(by_alias=True, mode="json") for k in (self.api_keys or [])],
+                "linked_accounts": [a.model_dump(by_alias=True, mode="json") for a in (self.linked_accounts or [])],
+                "profiles": [p.model_dump(by_alias=True, mode="json") for p in (self.profiles or [])],
                 "developer_keys": self.developer_keys or {},
                 "brand_kit": self.brand_kit or {},
                 "plan_tier": self.plan_tier,
@@ -243,15 +271,15 @@ class User(Document):
                 "google_id": self.google_id,
                 "api_key_hash": self.api_key_hash,
                 "api_keys": [
-                    k.model_dump(by_alias=True) if hasattr(k, "model_dump") else k
+                    k.model_dump(by_alias=True, mode="json") if hasattr(k, "model_dump") else k
                     for k in (self.api_keys or [])
                 ],
                 "linked_accounts": [
-                    a.model_dump(by_alias=True) if hasattr(a, "model_dump") else a
+                    a.model_dump(by_alias=True, mode="json") if hasattr(a, "model_dump") else a
                     for a in (self.linked_accounts or [])
                 ],
                 "profiles": [
-                    p.model_dump(by_alias=True) if hasattr(p, "model_dump") else p
+                    p.model_dump(by_alias=True, mode="json") if hasattr(p, "model_dump") else p
                     for p in (self.profiles or [])
                 ],
                 "developer_keys": self.developer_keys or {},

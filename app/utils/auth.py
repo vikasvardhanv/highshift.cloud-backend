@@ -1,7 +1,7 @@
 import hashlib
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from types import SimpleNamespace
 
@@ -31,6 +31,18 @@ def _normalize_json_list(value):
         if isinstance(parsed, dict):
             return [parsed]
     return []
+
+
+def _normalize_datetime(value):
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 class AuthUser(SimpleNamespace):
@@ -123,8 +135,8 @@ def _to_auth_user(row: dict) -> AuthUser:
                 id=k.get("id"),
                 name=k.get("name", "Default Key"),
                 key_hash=k.get("keyHash") or k.get("key_hash"),
-                created_at=k.get("created_at") or k.get("createdAt"),
-                last_used=k.get("lastUsed") or k.get("last_used"),
+                created_at=_normalize_datetime(k.get("created_at") or k.get("createdAt")),
+                last_used=_normalize_datetime(k.get("lastUsed") or k.get("last_used")),
             )
         )
 
@@ -140,7 +152,7 @@ def _to_auth_user(row: dict) -> AuthUser:
                 display_name=item.get("displayName") or item.get("display_name"),
                 access_token_enc=item.get("accessTokenEnc") or item.get("access_token_enc"),
                 refresh_token_enc=item.get("refreshTokenEnc") or item.get("refresh_token_enc"),
-                expires_at=item.get("expiresAt") or item.get("expires_at"),
+                expires_at=_normalize_datetime(item.get("expiresAt") or item.get("expires_at")),
                 profile_id=item.get("profileId") or item.get("profile_id"),
                 raw_profile=item.get("rawProfile") or item.get("raw_profile"),
                 picture=item.get("picture"),
@@ -159,7 +171,7 @@ def _to_auth_user(row: dict) -> AuthUser:
             SimpleNamespace(
                 id=p.get("id"),
                 name=p.get("name"),
-                created_at=p.get("created_at"),
+                created_at=_normalize_datetime(p.get("created_at") or p.get("createdAt")),
             )
             for p in _normalize_json_list(row.get("profiles"))
             if isinstance(p, dict)

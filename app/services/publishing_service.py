@@ -16,6 +16,18 @@ from app.platforms import instagram, twitter, facebook, linkedin, tiktok, youtub
 
 logger = logging.getLogger("publishing")
 
+
+def _as_naive_utc_datetime(value):
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return parsed
+
 # Platform content requirements
 PLATFORM_REQUIREMENTS = {
     "twitter": {
@@ -228,7 +240,9 @@ async def publish_content(
             # --- TWITTER ---
             if platform == "twitter":
                 # Check expiry and refresh if needed
-                if account.expires_at and account.expires_at < datetime.datetime.utcnow():
+                expires_at = _as_naive_utc_datetime(getattr(account, "expires_at", None))
+                account.expires_at = expires_at
+                if expires_at and expires_at < datetime.datetime.utcnow():
                     if account.refresh_token_enc:
                         try:
                             refresh_token = decrypt_token(account.refresh_token_enc)
