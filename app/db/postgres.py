@@ -634,6 +634,42 @@ def _id_param_expr(columns: Dict[str, str], param_index: int = 1) -> str:
     return f"${param_index}::uuid" if columns.get("id") == "uuid" else f"${param_index}"
 
 
+async def _ensure_schedule_queue(conn) -> None:
+    await conn.execute(
+        """
+        create table if not exists scheduled_post_queue (
+          id text primary key,
+          user_id text not null,
+          accounts jsonb not null default '[]'::jsonb,
+          content text not null default '',
+          media jsonb not null default '[]'::jsonb,
+          scheduled_for timestamptz not null,
+          status text not null default 'pending',
+          job_id text,
+          result jsonb,
+          error text,
+          attempts integer not null default 0,
+          last_attempt_at timestamptz,
+          published_at timestamptz,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now()
+        )
+        """
+    )
+    await conn.execute(
+        """
+        create index if not exists idx_scheduled_post_queue_due
+        on scheduled_post_queue (status, scheduled_for)
+        """
+    )
+    await conn.execute(
+        """
+        create index if not exists idx_scheduled_post_queue_user
+        on scheduled_post_queue (user_id, scheduled_for desc)
+        """
+    )
+
+
 async def _scheduled_post_columns(conn) -> Dict[str, str]:
     rows = await conn.fetch(
         """
@@ -673,46 +709,19 @@ async def create_scheduled_post(
 ) -> Dict[str, Any]:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
-        user_col = _pick_column(columns, "user_id", "userId")
-        content_col = _pick_column(columns, "content", "text", "body")
-        accounts_col = _pick_column(columns, "accounts", "target_accounts", "targetAccounts")
-        scheduled_col = _pick_column(
-            columns, "scheduled_for", "scheduled_time", "scheduled_at", "scheduledFor", "scheduledAt"
-        )
-
-        if not user_col or not content_col or not accounts_col or not scheduled_col:
-            raise RuntimeError(f"scheduled_posts schema missing required columns: {sorted(columns.keys())}")
-
-        user_value_expr = "$1::uuid" if columns.get(user_col) == "uuid" else "$1"
-        insert_cols = [user_col, content_col, accounts_col, scheduled_col]
-        value_exprs = [
-            user_value_expr,
-            "$2",
-            _json_value_expr(3, columns.get(accounts_col)),
-            "$4::timestamptz",
-        ]
-        values = [user_id, content or "", _json_dumps(accounts or []), scheduled_for_iso]
-
-        media_col = _pick_column(columns, "media", "media_urls", "mediaUrls")
-        if media_col:
-            insert_cols.append(media_col)
-            value_exprs.append(_json_value_expr(len(values) + 1, columns.get(media_col)))
-            values.append(_json_dumps(media or []))
-
-        status_col = _pick_column(columns, "status")
-        if status_col:
-            insert_cols.append(status_col)
-            value_exprs.append(f"${len(values) + 1}")
-            values.append("pending")
-
+        await _ensure_schedule_queue(conn)
         row = await conn.fetchrow(
-            f"""
-            insert into scheduled_posts ({", ".join(_quote_ident(col) for col in insert_cols)})
-            values ({", ".join(value_exprs)})
+            """
+            insert into scheduled_post_queue (id, user_id, content, accounts, scheduled_for, media, status)
+            values ($1, $2, $3, $4::jsonb, $5::timestamptz, $6::jsonb, 'pending')
             returning *
             """,
-            *values,
+            str(uuid.uuid4()),
+            str(user_id),
+            content or "",
+            _json_dumps(accounts or []),
+            scheduled_for_iso,
+            _json_dumps(media or []),
         )
     return _normalize_scheduled_post(row) or {}
 
@@ -720,20 +729,14 @@ async def create_scheduled_post(
 async def list_scheduled_posts(user_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
-        user_col = _pick_column(columns, "user_id", "userId")
-        scheduled_col = _pick_column(
-            columns, "scheduled_for", "scheduled_time", "scheduled_at", "scheduledFor", "scheduledAt"
-        )
-        if not user_col or not scheduled_col:
-            return []
+        await _ensure_schedule_queue(conn)
         rows = await conn.fetch(
-            f"""
-            select * from scheduled_posts
-            where {_quote_ident(user_col)}::text=$1
-            order by {_quote_ident(scheduled_col)} desc
+            """
+            select * from scheduled_post_queue
+            where user_id=$1
+            order by scheduled_for desc
             """,
-            user_id,
+            str(user_id),
         )
     return [_normalize_scheduled_post(r) for r in rows if _normalize_scheduled_post(r)]
 
@@ -741,24 +744,15 @@ async def list_scheduled_posts(user_id: str):
 async def cancel_scheduled_post(user_id: str, post_id: str) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
-        user_col = _pick_column(columns, "user_id", "userId")
-        status_col = _pick_column(columns, "status")
-        updated_col = _pick_column(columns, "updated_at", "updatedAt")
-        if not user_col or not status_col:
-            return False
-        set_parts = [f"{_quote_ident(status_col)}='canceled'"]
-        if updated_col:
-            set_parts.append(f"{_quote_ident(updated_col)}=now()")
+        await _ensure_schedule_queue(conn)
         res = await conn.execute(
-            f"""
-            update scheduled_posts
-            set {", ".join(set_parts)}
-            where id={_id_param_expr(columns, 1)} and {_quote_ident(user_col)}::text=$2
-              and {_quote_ident(status_col)} in ('pending','processing')
+            """
+            update scheduled_post_queue
+            set status='canceled', updated_at=now()
+            where id=$1 and user_id=$2 and status in ('pending','processing')
             """,
-            post_id,
-            user_id,
+            str(post_id),
+            str(user_id),
         )
     return res.endswith("1")
 
@@ -766,10 +760,10 @@ async def cancel_scheduled_post(user_id: str, post_id: str) -> bool:
 async def get_scheduled_post(post_id: str) -> Optional[Dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
+        await _ensure_schedule_queue(conn)
         row = await conn.fetchrow(
-            f"select * from scheduled_posts where id={_id_param_expr(columns, 1)}",
-            post_id,
+            "select * from scheduled_post_queue where id=$1",
+            str(post_id),
         )
     return _normalize_scheduled_post(row)
 
@@ -777,21 +771,14 @@ async def get_scheduled_post(post_id: str) -> Optional[Dict[str, Any]]:
 async def set_scheduled_post_job_id(post_id: str, job_id: str) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
-        job_col = _pick_column(columns, "job_id", "jobId")
-        updated_col = _pick_column(columns, "updated_at", "updatedAt")
-        if not job_col:
-            return False
-        set_parts = [f"{_quote_ident(job_col)}=$2"]
-        if updated_col:
-            set_parts.append(f"{_quote_ident(updated_col)}=now()")
+        await _ensure_schedule_queue(conn)
         res = await conn.execute(
-            f"""
-            update scheduled_posts
-            set {", ".join(set_parts)}
-            where id={_id_param_expr(columns, 1)}
+            """
+            update scheduled_post_queue
+            set job_id=$2, updated_at=now()
+            where id=$1
             """,
-            post_id,
+            str(post_id),
             job_id,
         )
     return res.endswith("1")
@@ -803,33 +790,20 @@ async def claim_scheduled_post_by_id(post_id: str) -> Optional[Dict[str, Any]]:
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
-        status_col = _pick_column(columns, "status")
-        scheduled_col = _pick_column(
-            columns, "scheduled_for", "scheduled_time", "scheduled_at", "scheduledFor", "scheduledAt"
-        )
-        if not status_col or not scheduled_col:
-            return None
-        set_parts = [f"{_quote_ident(status_col)}='processing'"]
-        attempts_col = _pick_column(columns, "attempts")
-        if attempts_col:
-            set_parts.append(f"{_quote_ident(attempts_col)}={_quote_ident(attempts_col)} + 1")
-        last_attempt_col = _pick_column(columns, "last_attempt_at", "lastAttemptAt")
-        if last_attempt_col:
-            set_parts.append(f"{_quote_ident(last_attempt_col)}=now()")
-        updated_col = _pick_column(columns, "updated_at", "updatedAt")
-        if updated_col:
-            set_parts.append(f"{_quote_ident(updated_col)}=now()")
+        await _ensure_schedule_queue(conn)
         row = await conn.fetchrow(
-            f"""
-            update scheduled_posts
-            set {", ".join(set_parts)}
-            where id={_id_param_expr(columns, 1)}
-              and {_quote_ident(status_col)}='pending'
-              and {_quote_ident(scheduled_col)} <= now()
+            """
+            update scheduled_post_queue
+            set status='processing',
+                attempts=attempts + 1,
+                last_attempt_at=now(),
+                updated_at=now()
+            where id=$1
+              and status='pending'
+              and scheduled_for <= now()
             returning *
             """,
-            post_id,
+            str(post_id),
         )
     return _normalize_scheduled_post(row)
 
@@ -840,36 +814,23 @@ async def claim_next_due_scheduled_post() -> Optional[Dict[str, Any]]:
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
-        status_col = _pick_column(columns, "status")
-        scheduled_col = _pick_column(
-            columns, "scheduled_for", "scheduled_time", "scheduled_at", "scheduledFor", "scheduledAt"
-        )
-        if not status_col or not scheduled_col:
-            return None
-        set_parts = [f"{_quote_ident(status_col)}='processing'"]
-        attempts_col = _pick_column(columns, "attempts")
-        if attempts_col:
-            set_parts.append(f"{_quote_ident(attempts_col)}=sp.{_quote_ident(attempts_col)} + 1")
-        last_attempt_col = _pick_column(columns, "last_attempt_at", "lastAttemptAt")
-        if last_attempt_col:
-            set_parts.append(f"{_quote_ident(last_attempt_col)}=now()")
-        updated_col = _pick_column(columns, "updated_at", "updatedAt")
-        if updated_col:
-            set_parts.append(f"{_quote_ident(updated_col)}=now()")
+        await _ensure_schedule_queue(conn)
         row = await conn.fetchrow(
-            f"""
+            """
             with due as (
               select id
-              from scheduled_posts
-              where {_quote_ident(status_col)}='pending'
-                and {_quote_ident(scheduled_col)} <= now()
-              order by {_quote_ident(scheduled_col)} asc
+              from scheduled_post_queue
+              where status='pending'
+                and scheduled_for <= now()
+              order by scheduled_for asc
               for update skip locked
               limit 1
             )
-            update scheduled_posts sp
-            set {", ".join(set_parts)}
+            update scheduled_post_queue sp
+            set status='processing',
+                attempts=sp.attempts + 1,
+                last_attempt_at=now(),
+                updated_at=now()
             from due
             where sp.id = due.id
             returning sp.*
@@ -881,32 +842,19 @@ async def claim_next_due_scheduled_post() -> Optional[Dict[str, Any]]:
 async def mark_scheduled_post_published(post_id: str, result: Dict[str, Any]) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
-        status_col = _pick_column(columns, "status")
-        if not status_col:
-            return False
-        set_parts = [f"{_quote_ident(status_col)}='published'"]
-        result_col = _pick_column(columns, "result")
-        values = [post_id]
-        if result_col:
-            values.append(_json_dumps(result or {}))
-            set_parts.append(f"{_quote_ident(result_col)}=${len(values)}::jsonb")
-        error_col = _pick_column(columns, "error")
-        if error_col:
-            set_parts.append(f"{_quote_ident(error_col)}=null")
-        published_col = _pick_column(columns, "published_at", "publishedAt")
-        if published_col:
-            set_parts.append(f"{_quote_ident(published_col)}=now()")
-        updated_col = _pick_column(columns, "updated_at", "updatedAt")
-        if updated_col:
-            set_parts.append(f"{_quote_ident(updated_col)}=now()")
+        await _ensure_schedule_queue(conn)
         res = await conn.execute(
-            f"""
-            update scheduled_posts
-            set {", ".join(set_parts)}
-            where id={_id_param_expr(columns, 1)}
+            """
+            update scheduled_post_queue
+            set status='published',
+                result=$2::jsonb,
+                error=null,
+                published_at=now(),
+                updated_at=now()
+            where id=$1
             """,
-            *values,
+            str(post_id),
+            _json_dumps(result or {}),
         )
     return res.endswith("1")
 
@@ -914,26 +862,17 @@ async def mark_scheduled_post_published(post_id: str, result: Dict[str, Any]) ->
 async def mark_scheduled_post_failed(post_id: str, error: str) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        columns = await _scheduled_post_columns(conn)
-        status_col = _pick_column(columns, "status")
-        if not status_col:
-            return False
-        set_parts = [f"{_quote_ident(status_col)}='failed'"]
-        values = [post_id]
-        error_col = _pick_column(columns, "error")
-        if error_col:
-            values.append((error or "Unknown error")[:2000])
-            set_parts.append(f"{_quote_ident(error_col)}=${len(values)}")
-        updated_col = _pick_column(columns, "updated_at", "updatedAt")
-        if updated_col:
-            set_parts.append(f"{_quote_ident(updated_col)}=now()")
+        await _ensure_schedule_queue(conn)
         res = await conn.execute(
-            f"""
-            update scheduled_posts
-            set {", ".join(set_parts)}
-            where id={_id_param_expr(columns, 1)}
+            """
+            update scheduled_post_queue
+            set status='failed',
+                error=$2,
+                updated_at=now()
+            where id=$1
             """,
-            *values,
+            str(post_id),
+            (error or "Unknown error")[:2000],
         )
     return res.endswith("1")
 

@@ -203,6 +203,20 @@ async def oauth_callback(
 
     if not state_id:
         return RedirectResponse(f"{frontend_url}/dashboard?error=invalid_state")
+
+    oauth_extra = {}
+    oauth_state_for_cleanup = None
+    if platform != "twitter":
+        oauth_state_for_cleanup = await OAuthState.find_one({"state_id": state_id})
+        if oauth_state_for_cleanup and oauth_state_for_cleanup.extra_data:
+            oauth_extra = oauth_state_for_cleanup.extra_data
+            if isinstance(oauth_extra, str):
+                try:
+                    oauth_extra = json.loads(oauth_extra)
+                except (json.JSONDecodeError, TypeError):
+                    oauth_extra = {}
+            user_id_from_state = oauth_extra.get("user_id") or user_id_from_state
+            profile_id_from_state = oauth_extra.get("profile_id") or profile_id_from_state
     
     try:
         if platform == "twitter":
@@ -330,7 +344,7 @@ async def oauth_callback(
             token_data = await facebook.exchange_code(
                 client_id=os.getenv("FACEBOOK_APP_ID"),
                 client_secret=os.getenv("FACEBOOK_APP_SECRET"),
-                redirect_uri=os.getenv("FACEBOOK_REDIRECT_URI"),
+                redirect_uri=oauth_extra.get("redirect_uri") or os.getenv("FACEBOOK_REDIRECT_URI"),
                 code=code
             )
             user_access_token = token_data.get("access_token")
@@ -443,6 +457,8 @@ async def oauth_callback(
             redirect_params = f"platform=facebook&count={added_count}&token={jwt_token}"
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
+            if oauth_state_for_cleanup:
+                await oauth_state_for_cleanup.delete()
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
         if platform == "instagram":
@@ -450,7 +466,7 @@ async def oauth_callback(
             token_data = await instagram.exchange_code(
                 client_id=os.getenv("FACEBOOK_APP_ID"), 
                 client_secret=os.getenv("FACEBOOK_APP_SECRET"),
-                redirect_uri=os.getenv("INSTAGRAM_REDIRECT_URI"),
+                redirect_uri=oauth_extra.get("redirect_uri") or os.getenv("INSTAGRAM_REDIRECT_URI"),
                 code=code
             )
             user_access_token = token_data.get("access_token")
@@ -538,6 +554,8 @@ async def oauth_callback(
             redirect_params = f"platform=instagram&count={added_count}&token={jwt_token}"
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
+            if oauth_state_for_cleanup:
+                await oauth_state_for_cleanup.delete()
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
         if platform == "linkedin":
@@ -551,7 +569,7 @@ async def oauth_callback(
                 if not li_client_secret:
                      logger.error("LinkedIn Client Secret is missing in env vars")
                 # Must match whatever was sent in Step 1 exactly
-                li_redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", "").strip()
+                li_redirect_uri = (oauth_extra.get("redirect_uri") or os.getenv("LINKEDIN_REDIRECT_URI", "")).strip()
                 
                 logger.info(f"LinkedIn Token Exchange - ClientID: {li_client_id} | Redirect: {li_redirect_uri}")
                 
@@ -681,6 +699,8 @@ async def oauth_callback(
             redirect_params = f"platform=linkedin&token={jwt_token}"
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
+            if oauth_state_for_cleanup:
+                await oauth_state_for_cleanup.delete()
             
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
@@ -690,7 +710,7 @@ async def oauth_callback(
                 token_data = await youtube.exchange_code(
                     client_id=os.getenv("YOUTUBE_GOOGLE_CLIENT_ID"),
                     client_secret=os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET"),
-                    redirect_uri=os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI"),
+                    redirect_uri=oauth_extra.get("redirect_uri") or os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI"),
                     code=code
                 )
             except Exception as e:
@@ -772,6 +792,8 @@ async def oauth_callback(
             redirect_params = f"platform=youtube&token={jwt_token}"
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
+            if oauth_state_for_cleanup:
+                await oauth_state_for_cleanup.delete()
             
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 

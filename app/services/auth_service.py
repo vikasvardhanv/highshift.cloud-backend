@@ -114,6 +114,42 @@ def _twitter_redirect_uri(default_redirect_uri: Optional[str] = None) -> str:
     raise HTTPException(status_code=500, detail="TWITTER_REDIRECT_URI not configured")
 
 
+def _platform_redirect_uri(
+    platform: str,
+    env_name: str,
+    default_redirect_uri: Optional[str] = None,
+) -> str:
+    backend_url = (os.getenv("BACKEND_URL") or "").strip().rstrip("/")
+    if backend_url:
+        return f"{backend_url}/connect/{platform}/callback"
+
+    configured = (os.getenv(env_name) or "").strip()
+    if configured:
+        return configured
+    if default_redirect_uri:
+        return default_redirect_uri
+
+    raise HTTPException(status_code=500, detail=f"{env_name} not configured")
+
+
+async def _store_oauth_redirect_state(
+    state_id: str,
+    state_payload: str,
+    redirect_uri: str,
+    scopes: list[str],
+) -> None:
+    parsed_state = parse_oauth_state_payload(state_payload)
+    await insert_oauth_state(
+        state_id=state_id,
+        extra_data={
+            "user_id": parsed_state.get("user_id"),
+            "profile_id": parsed_state.get("profile_id"),
+            "redirect_uri": redirect_uri,
+            "scopes": scopes,
+        },
+    )
+
+
 def get_twitter_redirect_uri() -> str:
     return _twitter_redirect_uri()
 
@@ -279,7 +315,7 @@ async def get_platform_connect_payload(
 ) -> dict:
     if platform == "instagram":
         client_id = os.getenv("FACEBOOK_APP_ID")
-        redirect_uri = os.getenv("INSTAGRAM_REDIRECT_URI")
+        redirect_uri = _platform_redirect_uri("instagram", "INSTAGRAM_REDIRECT_URI", default_redirect_uri)
         default_scopes = [
             "instagram_basic",
             "instagram_content_publish",
@@ -288,6 +324,7 @@ async def get_platform_connect_payload(
         ]
         env_scopes = os.getenv("INSTAGRAM_SCOPES", "").split(",")
         final_scopes = list(set(default_scopes + [s for s in env_scopes if s]))
+        await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, final_scopes)
         return {
             "authUrl": await instagram.get_auth_url(
                 client_id, redirect_uri, state_payload, final_scopes
@@ -332,7 +369,7 @@ async def get_platform_connect_payload(
 
     if platform == "facebook":
         client_id = os.getenv("FACEBOOK_APP_ID")
-        redirect_uri = os.getenv("FACEBOOK_REDIRECT_URI")
+        redirect_uri = _platform_redirect_uri("facebook", "FACEBOOK_REDIRECT_URI", default_redirect_uri)
         default_scopes = [
             "public_profile",
             "pages_show_list",
@@ -347,6 +384,7 @@ async def get_platform_connect_payload(
         final_scopes = list(
             set(default_scopes + [s for s in env_scopes if s and "instagram" not in s])
         )
+        await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, final_scopes)
         return {
             "authUrl": await facebook.get_auth_url(
                 client_id, redirect_uri, state_payload, final_scopes
@@ -355,8 +393,9 @@ async def get_platform_connect_payload(
 
     if platform == "linkedin":
         client_id = os.getenv("LINKEDIN_CLIENT_ID")
-        redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
+        redirect_uri = _platform_redirect_uri("linkedin", "LINKEDIN_REDIRECT_URI", default_redirect_uri)
         scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social,email").split(",")
+        await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, scopes)
         return {
             "authUrl": await linkedin.get_auth_url(
                 client_id, redirect_uri, state_payload, scopes
@@ -365,7 +404,7 @@ async def get_platform_connect_payload(
 
     if platform == "youtube":
         client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
-        redirect_uri = os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI")
+        redirect_uri = _platform_redirect_uri("youtube", "YOUTUBE_GOOGLE_REDIRECT_URI", default_redirect_uri)
         default_scopes = [
             "https://www.googleapis.com/auth/youtube.upload",
             "https://www.googleapis.com/auth/youtube.readonly",
@@ -375,6 +414,7 @@ async def get_platform_connect_payload(
         ]
         env_scopes = os.getenv("YOUTUBE_GOOGLE_SCOPES", "").split(",")
         final_scopes = list(set(default_scopes + [s for s in env_scopes if s]))
+        await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, final_scopes)
         return {
             "authUrl": await youtube.get_auth_url(
                 client_id, redirect_uri, state_payload, final_scopes
