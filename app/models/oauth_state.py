@@ -1,5 +1,7 @@
 from datetime import datetime
+import json
 import os
+from typing import Any
 from typing import Optional
 from beanie import Document
 from pydantic import Field
@@ -24,6 +26,18 @@ class OAuthState(Document):
     def _use_postgres() -> bool:
         return is_postgres_url(os.getenv("DATABASE_URL"))
 
+    @staticmethod
+    def _normalize_extra_data(value: Any) -> dict:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
     @classmethod
     async def find_one(cls, query):  # type: ignore[override]
         if not cls._use_postgres():
@@ -37,7 +51,7 @@ class OAuthState(Document):
         return OAuthState(
             state_id=row.get("state_id"),
             code_verifier=row.get("code_verifier"),
-            extra_data=row.get("extra_data") or {},
+            extra_data=cls._normalize_extra_data(row.get("extra_data")),
             created_at=row.get("created_at"),
         )
 
