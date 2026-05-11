@@ -255,6 +255,12 @@ async def init_postgres(database_url: str) -> bool:
                 ("users", "credits", "add column if not exists credits integer not null default 100"),
                 ("oauth_states", "code_verifier", "add column if not exists code_verifier text"),
                 ("oauth_states", "extra_data", "add column if not exists extra_data jsonb not null default '{}'::jsonb"),
+                ("scheduled_posts", "user_id", "add column if not exists user_id uuid"),
+                ("scheduled_posts", "accounts", "add column if not exists accounts jsonb not null default '[]'::jsonb"),
+                ("scheduled_posts", "content", "add column if not exists content text not null default ''"),
+                ("scheduled_posts", "media", "add column if not exists media jsonb not null default '[]'::jsonb"),
+                ("scheduled_posts", "scheduled_for", "add column if not exists scheduled_for timestamptz"),
+                ("scheduled_posts", "status", "add column if not exists status text not null default 'pending'"),
                 ("scheduled_posts", "job_id", "add column if not exists job_id text"),
                 ("scheduled_posts", "result", "add column if not exists result jsonb"),
                 ("scheduled_posts", "error", "add column if not exists error text"),
@@ -281,6 +287,26 @@ async def init_postgres(database_url: str) -> bool:
                     print(f"✓ Migrated {table}.{col}")
                 except Exception as e:
                     print(f"  - {table}.{col}: {e}")
+            
+            try:
+                await conn.execute(
+                    """
+                    do $$
+                    begin
+                        if exists (
+                            select 1 from information_schema.columns
+                            where table_name='scheduled_posts' and column_name='scheduled_time'
+                        ) then
+                            update scheduled_posts
+                            set scheduled_for = scheduled_time
+                            where scheduled_for is null and scheduled_time is not null;
+                        end if;
+                    end $$;
+                    """
+                )
+                print("âœ“ Backfilled scheduled_posts.scheduled_for")
+            except Exception as e:
+                print(f"  - scheduled_posts.scheduled_for backfill: {e}")
             
             # Verify tables exist
             result = await conn.fetch("""
@@ -604,7 +630,7 @@ async def create_scheduled_post(
         row = await conn.fetchrow(
             """
             insert into scheduled_posts (user_id, content, accounts, scheduled_for, media, status)
-            values ($1::uuid, $2, $3::jsonb, $4::timestamptz, $5::jsonb, 'pending')
+            values ($1, $2, $3::jsonb, $4::timestamptz, $5::jsonb, 'pending')
             returning *
             """,
             user_id,
@@ -620,7 +646,7 @@ async def list_scheduled_posts(user_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "select * from scheduled_posts where user_id=$1::uuid order by scheduled_for desc",
+            "select * from scheduled_posts where user_id::text=$1 order by scheduled_for desc",
             user_id,
         )
     return [dict(r) for r in rows]
@@ -633,7 +659,7 @@ async def cancel_scheduled_post(user_id: str, post_id: str) -> bool:
             """
             update scheduled_posts
             set status='canceled', updated_at=now()
-            where id=$1::uuid and user_id=$2::uuid and status in ('pending','processing')
+            where id=$1::uuid and user_id::text=$2 and status in ('pending','processing')
             """,
             post_id,
             user_id,
