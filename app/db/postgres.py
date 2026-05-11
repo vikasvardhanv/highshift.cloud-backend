@@ -627,19 +627,55 @@ async def create_scheduled_post(
 ) -> Dict[str, Any]:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        column_rows = await conn.fetch(
             """
-            insert into scheduled_posts (user_id, content, accounts, scheduled_for, media, status)
-            values ($1, $2, $3::jsonb, $4::timestamptz, $5::jsonb, 'pending')
+            select column_name, data_type
+            from information_schema.columns
+            where table_schema='public' and table_name='scheduled_posts'
+            """
+        )
+        columns = {row["column_name"]: row["data_type"] for row in column_rows}
+        accounts_col = next((col for col in ("accounts", "target_accounts") if col in columns), None)
+        scheduled_col = next((col for col in ("scheduled_for", "scheduled_time") if col in columns), None)
+
+        if "user_id" not in columns or not accounts_col or not scheduled_col:
+            raise RuntimeError(f"scheduled_posts schema missing required columns: {sorted(columns.keys())}")
+
+        user_value_expr = "$1::uuid" if columns.get("user_id") == "uuid" else "$1"
+        insert_cols = ["user_id", "content", accounts_col, scheduled_col]
+        value_exprs = [user_value_expr, "$2", "$3::jsonb", "$4::timestamptz"]
+        values = [user_id, content or "", _json_dumps(accounts or []), scheduled_for_iso]
+
+        if "media" in columns:
+            insert_cols.append("media")
+            value_exprs.append("$5::jsonb")
+            values.append(_json_dumps(media or []))
+        elif "media_urls" in columns:
+            insert_cols.append("media_urls")
+            value_exprs.append("$5::jsonb")
+            values.append(_json_dumps(media or []))
+
+        if "status" in columns:
+            insert_cols.append("status")
+            value_exprs.append(f"${len(values) + 1}")
+            values.append("pending")
+
+        row = await conn.fetchrow(
+            f"""
+            insert into scheduled_posts ({", ".join(insert_cols)})
+            values ({", ".join(value_exprs)})
             returning *
             """,
-            user_id,
-            content or "",
-            _json_dumps(accounts or []),
-            scheduled_for_iso,
-            _json_dumps(media or []),
+            *values,
         )
-    return dict(row)
+    data = dict(row)
+    if "scheduled_for" not in data and "scheduled_time" in data:
+        data["scheduled_for"] = data["scheduled_time"]
+    if "accounts" not in data and "target_accounts" in data:
+        data["accounts"] = data["target_accounts"]
+    if "media" not in data and "media_urls" in data:
+        data["media"] = data["media_urls"]
+    return data
 
 
 async def list_scheduled_posts(user_id: str):
