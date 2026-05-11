@@ -38,6 +38,46 @@ from app.utils.auth import (
 
 logger = logging.getLogger(__name__)
 
+STABLE_BACKEND_URL = "https://api.highshift.cloud"
+BROKEN_BACKEND_HOSTS = (
+    "highshift-cloud-backend.vercel.app",
+)
+
+
+def _clean_url(value: Optional[str]) -> str:
+    return (value or "").strip().rstrip("/")
+
+
+def _is_broken_backend_url(value: Optional[str]) -> bool:
+    clean = _clean_url(value).lower()
+    return any(host in clean for host in BROKEN_BACKEND_HOSTS)
+
+
+def get_backend_url() -> str:
+    backend_url = _clean_url(os.getenv("BACKEND_URL"))
+    if not backend_url or _is_broken_backend_url(backend_url):
+        return STABLE_BACKEND_URL
+    return backend_url
+
+
+def _redirect_uri_from_env_or_stable(
+    platform: str,
+    env_name: str,
+    default_redirect_uri: Optional[str] = None,
+) -> str:
+    configured = _clean_url(os.getenv(env_name))
+    if configured and not _is_broken_backend_url(configured):
+        return configured
+
+    backend_url = get_backend_url()
+    if backend_url:
+        return f"{backend_url}/connect/{platform}/callback"
+
+    if default_redirect_uri and not _is_broken_backend_url(default_redirect_uri):
+        return default_redirect_uri
+
+    raise HTTPException(status_code=500, detail=f"{env_name} not configured")
+
 
 def get_frontend_url() -> str:
     frontend_url = os.getenv("FRONTEND_URL")
@@ -99,19 +139,9 @@ def _split_scope_env(value: str, defaults: list[str]) -> list[str]:
 
 
 def _twitter_redirect_uri(default_redirect_uri: Optional[str] = None) -> str:
-    configured = (os.getenv("TWITTER_REDIRECT_URI") or "").strip()
-    backend_url = (os.getenv("BACKEND_URL") or "").strip().rstrip("/")
-    backend_redirect_uri = f"{backend_url}/connect/twitter/callback" if backend_url else None
-
-    if configured:
-        return configured
-    if backend_redirect_uri:
-        return backend_redirect_uri
-
-    if default_redirect_uri:
-        return default_redirect_uri
-
-    raise HTTPException(status_code=500, detail="TWITTER_REDIRECT_URI not configured")
+    return _redirect_uri_from_env_or_stable(
+        "twitter", "TWITTER_REDIRECT_URI", default_redirect_uri
+    )
 
 
 def _platform_redirect_uri(
@@ -119,17 +149,7 @@ def _platform_redirect_uri(
     env_name: str,
     default_redirect_uri: Optional[str] = None,
 ) -> str:
-    backend_url = (os.getenv("BACKEND_URL") or "").strip().rstrip("/")
-    if backend_url:
-        return f"{backend_url}/connect/{platform}/callback"
-
-    configured = (os.getenv(env_name) or "").strip()
-    if configured:
-        return configured
-    if default_redirect_uri:
-        return default_redirect_uri
-
-    raise HTTPException(status_code=500, detail=f"{env_name} not configured")
+    return _redirect_uri_from_env_or_stable(platform, env_name, default_redirect_uri)
 
 
 async def _store_oauth_redirect_state(
@@ -234,7 +254,7 @@ def build_user_me_response(user: User) -> dict:
 
 def build_google_login_url() -> str:
     client_id = os.getenv("GOOGLE_CLIENT_ID") or os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
-    backend_url = os.getenv("BACKEND_URL", "https://api.highshift.cloud")
+    backend_url = get_backend_url()
     backend_redirect_uri = f"{backend_url}/auth/google/callback"
     state = str(uuid.uuid4())
     scope_str = "openid email profile"
@@ -248,7 +268,7 @@ def build_google_login_url() -> str:
 async def google_login_callback_redirect(code: str) -> str:
     client_id = os.getenv("GOOGLE_CLIENT_ID") or os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET") or os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET")
-    backend_redirect_uri = f"{os.getenv('BACKEND_URL', 'https://api.highshift.cloud')}/auth/google/callback"
+    backend_redirect_uri = f"{get_backend_url()}/auth/google/callback"
     frontend_url = get_frontend_url()
 
     async with httpx.AsyncClient() as client:
@@ -468,7 +488,7 @@ async def get_platform_connect_payload(
             return {"action": "show_form", "fields": ["instance_url"]}
 
         redirect_uri = os.getenv(
-            "MASTODON_REDIRECT_URI", f"{os.getenv('BACKEND_URL')}/auth/mastodon/callback"
+            "MASTODON_REDIRECT_URI", f"{get_backend_url()}/auth/mastodon/callback"
         )
         app_data = await mastodon.get_app_credentials(
             instance_url, "Social Raven", redirect_uri, os.getenv("FRONTEND_URL")

@@ -24,6 +24,7 @@ from app.services.auth_service import (
     build_google_login_url,
     build_oauth_state_payload,
     build_user_me_response,
+    get_backend_url,
     get_frontend_url,
     get_platform_connect_payload,
     get_twitter_redirect_uri,
@@ -43,6 +44,13 @@ async def ensure_db():
         raise HTTPException(status_code=503, detail="Database unavailable")
 
 router = APIRouter(prefix="/auth", tags=["Auth"], dependencies=[Depends(ensure_db)])
+
+
+def _callback_redirect_uri(platform: str, env_name: str, oauth_extra: dict) -> str:
+    redirect_uri = (oauth_extra.get("redirect_uri") or os.getenv(env_name) or "").strip()
+    if not redirect_uri or "highshift-cloud-backend.vercel.app" in redirect_uri:
+        redirect_uri = f"{get_backend_url()}/connect/{platform}/callback"
+    return redirect_uri
 
 # --- Pydantic Models for Auth ---
 class UserRegister(BaseModel):
@@ -344,7 +352,7 @@ async def oauth_callback(
             token_data = await facebook.exchange_code(
                 client_id=os.getenv("FACEBOOK_APP_ID"),
                 client_secret=os.getenv("FACEBOOK_APP_SECRET"),
-                redirect_uri=oauth_extra.get("redirect_uri") or os.getenv("FACEBOOK_REDIRECT_URI"),
+                redirect_uri=_callback_redirect_uri("facebook", "FACEBOOK_REDIRECT_URI", oauth_extra),
                 code=code
             )
             user_access_token = token_data.get("access_token")
@@ -466,7 +474,7 @@ async def oauth_callback(
             token_data = await instagram.exchange_code(
                 client_id=os.getenv("FACEBOOK_APP_ID"), 
                 client_secret=os.getenv("FACEBOOK_APP_SECRET"),
-                redirect_uri=oauth_extra.get("redirect_uri") or os.getenv("INSTAGRAM_REDIRECT_URI"),
+                redirect_uri=_callback_redirect_uri("instagram", "INSTAGRAM_REDIRECT_URI", oauth_extra),
                 code=code
             )
             user_access_token = token_data.get("access_token")
@@ -569,7 +577,7 @@ async def oauth_callback(
                 if not li_client_secret:
                      logger.error("LinkedIn Client Secret is missing in env vars")
                 # Must match whatever was sent in Step 1 exactly
-                li_redirect_uri = (oauth_extra.get("redirect_uri") or os.getenv("LINKEDIN_REDIRECT_URI", "")).strip()
+                li_redirect_uri = _callback_redirect_uri("linkedin", "LINKEDIN_REDIRECT_URI", oauth_extra)
                 
                 logger.info(f"LinkedIn Token Exchange - ClientID: {li_client_id} | Redirect: {li_redirect_uri}")
                 
@@ -710,7 +718,7 @@ async def oauth_callback(
                 token_data = await youtube.exchange_code(
                     client_id=os.getenv("YOUTUBE_GOOGLE_CLIENT_ID"),
                     client_secret=os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET"),
-                    redirect_uri=oauth_extra.get("redirect_uri") or os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI"),
+                    redirect_uri=_callback_redirect_uri("youtube", "YOUTUBE_GOOGLE_REDIRECT_URI", oauth_extra),
                     code=code
                 )
             except Exception as e:

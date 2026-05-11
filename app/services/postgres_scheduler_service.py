@@ -32,6 +32,18 @@ async def _publish_claimed_post(post: Dict[str, Any]) -> Dict[str, Any]:
             media_urls=post.get("media") or [],
             local_media_paths=[],
         )
+        failures = [
+            item for item in result.get("results", [])
+            if item.get("status") != "success"
+        ]
+        if failures:
+            error = "; ".join(
+                f"{item.get('platform', 'platform')}: {item.get('error', 'failed')}"
+                for item in failures
+            )
+            await mark_scheduled_post_failed(str(post["id"]), error)
+            return {"status": "failed", "error": error, "result": result}
+
         await mark_scheduled_post_published(str(post["id"]), result)
         await insert_activity(
             user_id=str(user.id),
