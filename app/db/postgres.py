@@ -7,6 +7,22 @@ import asyncpg
 
 _pool: Optional[asyncpg.Pool] = None
 
+_JSON_COLUMNS = {
+    "api_keys",
+    "linked_accounts",
+    "profiles",
+    "developer_keys",
+    "brand_kit",
+    "extra_data",
+    "accounts",
+    "media",
+    "result",
+    "tags",
+    "meta",
+    "events",
+    "platforms",
+}
+
 
 def _normalize_pg_url(url: str) -> str:
     normalized = url.strip()
@@ -281,7 +297,13 @@ def _record_to_dict(record: Optional[asyncpg.Record]) -> Optional[Dict[str, Any]
     if not record:
         return None
     data = dict(record)
-    # asyncpg already decodes json/jsonb to dict/list.
+    for key in _JSON_COLUMNS:
+        value = data.get(key)
+        if isinstance(value, str):
+            try:
+                data[key] = json.loads(value)
+            except json.JSONDecodeError:
+                pass
     return data
 
 

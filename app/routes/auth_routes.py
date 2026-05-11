@@ -281,7 +281,7 @@ async def oauth_callback(
             if not user:
                 # Create NEW USER and generate API KEY
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                     apiKeyHash=hash_key(api_key_to_return),
                     linkedAccounts=[linked_account]
                 )
@@ -388,7 +388,7 @@ async def oauth_callback(
             new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                     apiKeyHash=hash_key(api_key_to_return),
                     linkedAccounts=[] # Will fill below
                 )
@@ -490,7 +490,7 @@ async def oauth_callback(
             new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                     apiKeyHash=hash_key(api_key_to_return),
                     linkedAccounts=[]
                 )
@@ -629,7 +629,7 @@ async def oauth_callback(
             new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                     apiKeyHash=hash_key(api_key_to_return),
                     linkedAccounts=[]
                 )
@@ -733,7 +733,7 @@ async def oauth_callback(
             new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                     apiKeyHash=hash_key(api_key_to_return),
                     linkedAccounts=[]
                 )
@@ -810,7 +810,7 @@ async def oauth_callback(
             new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                      apiKeyHash=hash_key(api_key_to_return),
                      linkedAccounts=[]
                 )
@@ -884,7 +884,7 @@ async def oauth_callback(
             new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                      apiKeyHash=hash_key(api_key_to_return),
                      linkedAccounts=[]
                 )
@@ -964,7 +964,7 @@ async def oauth_callback(
             new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                      apiKeyHash=hash_key(api_key_to_return),
                      linkedAccounts=[]
                 )
@@ -1051,7 +1051,7 @@ async def oauth_callback(
             new_user = False
             if not user:
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
-                user = User(
+                user = User.build(
                      apiKeyHash=hash_key(api_key_to_return),
                      linkedAccounts=[]
                 )

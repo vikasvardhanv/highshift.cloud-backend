@@ -23,6 +23,10 @@ class OAuthStateData(NamedTuple):
     extra_data: dict
     created_at: datetime
 
+    async def delete(self, *args, **kwargs):
+        await delete_oauth_state(self.state_id)
+        return None
+
 class OAuthState(Document):
     state_id: str = Field(unique=True)
     code_verifier: Optional[str] = None

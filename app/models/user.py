@@ -73,6 +73,16 @@ class Profile(BaseModel):
     name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+
+def _coerce_model_list(values: Any, model_cls: type[BaseModel]) -> list:
+    if not values:
+        return []
+    return [
+        value if isinstance(value, model_cls) else model_cls.model_validate(value)
+        for value in values
+    ]
+
+
 class User(Document):
     id: Optional[str] = Field(None, primary_key=True)  # Override Beanie's default ObjectId for PostgreSQL UUID support
     api_key_hash: str = Field(unique=True, alias="apiKeyHash")
@@ -110,9 +120,37 @@ class User(Document):
     def _use_postgres() -> bool:
         return is_postgres_url(os.getenv("DATABASE_URL"))
 
+    @classmethod
+    def build(cls, **data) -> "User":
+        if not cls._use_postgres():
+            return cls(**data)
+
+        values = {
+            "id": data.get("id"),
+            "api_key_hash": data.get("api_key_hash", data.get("apiKeyHash")),
+            "created_at": data.get("created_at") or datetime.utcnow(),
+            "updated_at": data.get("updated_at") or datetime.utcnow(),
+            "api_keys": _coerce_model_list(data.get("api_keys", data.get("apiKeys")), ApiKey),
+            "linked_accounts": _coerce_model_list(
+                data.get("linked_accounts", data.get("linkedAccounts")),
+                LinkedAccount,
+            ),
+            "profiles": _coerce_model_list(data.get("profiles"), Profile),
+            "developer_keys": data.get("developer_keys", data.get("developerKeys")) or {},
+            "brand_kit": data.get("brand_kit", data.get("brandKit")) or {},
+            "plan_tier": data.get("plan_tier", data.get("planTier")) or "starter",
+            "max_profiles": data.get("max_profiles", data.get("maxProfiles")) or 50,
+            "email": data.get("email"),
+            "password_hash": data.get("password_hash", data.get("passwordHash")),
+            "google_id": data.get("google_id", data.get("googleId")),
+            "reset_token": data.get("reset_token", data.get("resetToken")),
+            "reset_token_expiry": data.get("reset_token_expiry", data.get("resetTokenExpiry")),
+        }
+        return cls.model_construct(**values)
+
     @staticmethod
     def _from_row(row: dict) -> "User":
-        return User(
+        return User.build(
             id=str(row.get("id")),
             apiKeyHash=row.get("api_key_hash"),
             created_at=row.get("created_at"),
