@@ -70,13 +70,26 @@ async def create_schedule(
     if dt <= datetime.datetime.now(datetime.timezone.utc):
         raise HTTPException(status_code=400, detail="Scheduled time must be in the future")
 
-    post = await create_scheduled_post(
-        user_id=str(user.id),
-        content=content or "",
-        accounts=accounts,
-        scheduled_for_iso=dt.isoformat(),
-        media=media_urls,
-    )
+    try:
+        post = await create_scheduled_post(
+            user_id=str(user.id),
+            content=content or "",
+            accounts=accounts,
+            scheduled_for_iso=dt.isoformat(),
+            media=media_urls,
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to create scheduled post: user_id=%s account_count=%s scheduled_for=%s media_count=%s error=%s",
+            str(user.id),
+            len(accounts or []),
+            dt.isoformat(),
+            len(media_urls or []),
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to schedule post")
+
     temporal_job_id = None
     try:
         temporal_job_id = await schedule_post_workflow(str(post["id"]), dt)
@@ -85,13 +98,16 @@ async def create_schedule(
         logger.error("Failed to schedule Temporal workflow for post %s: %s", post["id"], e, exc_info=True)
 
     # Log activity
-    await insert_activity(
-        user_id=str(user.id),
-        title=f"Scheduled a post for {dt.strftime('%Y-%m-%d %H:%M')}",
-        type_="success",
-        platform="System",
-        meta={"postId": str(post["id"])},
-    )
+    try:
+        await insert_activity(
+            user_id=str(user.id),
+            title=f"Scheduled a post for {dt.strftime('%Y-%m-%d %H:%M')}",
+            type_="success",
+            platform="System",
+            meta={"postId": str(post["id"])},
+        )
+    except Exception as e:
+        logger.error("Failed to log scheduled post activity for post %s: %s", post["id"], e, exc_info=True)
     
     return {
         "success": True,
