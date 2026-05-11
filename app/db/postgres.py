@@ -660,14 +660,20 @@ async def create_scheduled_post(
             value_exprs.append(f"${len(values) + 1}")
             values.append("pending")
 
-        row = await conn.fetchrow(
-            f"""
-            insert into scheduled_posts ({", ".join(insert_cols)})
-            values ({", ".join(value_exprs)})
-            returning *
-            """,
-            *values,
-        )
+        try:
+            row = await conn.fetchrow(
+                f"""
+                insert into scheduled_posts ({", ".join(insert_cols)})
+                values ({", ".join(value_exprs)})
+                returning *
+                """,
+                *values,
+            )
+        except Exception as e:
+            print("SCHEDULE INSERT ERROR:", str(e))
+            print("INSERT COLS:", insert_cols)
+            print("VALUES:", values)
+            raise
     data = dict(row)
     if "scheduled_for" not in data and "scheduled_time" in data:
         data["scheduled_for"] = data["scheduled_time"]
