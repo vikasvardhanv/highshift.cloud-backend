@@ -1,7 +1,7 @@
 from datetime import datetime
 import json
 import os
-from typing import Any
+from typing import Any, NamedTuple
 from typing import Optional
 from beanie import Document
 from pydantic import Field, field_validator
@@ -11,6 +11,14 @@ from app.db.postgres import (
     insert_oauth_state,
     is_postgres_url,
 )
+
+
+class OAuthStateData(NamedTuple):
+    """Lightweight data class for PostgreSQL-backed OAuthState"""
+    state_id: str
+    code_verifier: Optional[str]
+    extra_data: dict
+    created_at: datetime
 
 class OAuthState(Document):
     state_id: str = Field(unique=True)
@@ -51,7 +59,8 @@ class OAuthState(Document):
         row = await get_oauth_state(state_id)
         if not row:
             return None
-        return OAuthState(
+        # Return a lightweight data object instead of trying to instantiate the Beanie Document
+        return OAuthStateData(
             state_id=row.get("state_id"),
             code_verifier=row.get("code_verifier"),
             extra_data=row.get("extra_data"),
