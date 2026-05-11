@@ -1,9 +1,11 @@
 from datetime import datetime
 import uuid
-from typing import List, Optional
+import json
+import logging
+from typing import List, Optional, Any
 import os
 from beanie import Document
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.db.postgres import (
     fetch_user_by_email_ci,
     fetch_user_by_google_or_email,
@@ -13,6 +15,32 @@ from app.db.postgres import (
     is_postgres_url,
     update_user,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_json_value(value: Any, target_type: str) -> Any:
+    """Normalize PostgreSQL JSONB values to Python objects"""
+    if value is None:
+        return [] if target_type == "list" else {}
+    
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if target_type == "list":
+                return parsed if isinstance(parsed, list) else []
+            elif target_type == "dict":
+                return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Failed to parse JSON {target_type}: {e}")
+            return [] if target_type == "list" else {}
+    
+    if target_type == "list":
+        return value if isinstance(value, list) else []
+    elif target_type == "dict":
+        return value if isinstance(value, dict) else {}
+    
+    return value
 
 class LinkedAccount(BaseModel):
     platform: str
@@ -46,6 +74,7 @@ class Profile(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class User(Document):
+    id: Optional[str] = Field(None, primary_key=True)  # Override Beanie's default ObjectId for PostgreSQL UUID support
     api_key_hash: str = Field(unique=True, alias="apiKeyHash")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -88,11 +117,11 @@ class User(Document):
             apiKeyHash=row.get("api_key_hash"),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at"),
-            apiKeys=row.get("api_keys") or [],
-            linkedAccounts=row.get("linked_accounts") or [],
-            profiles=row.get("profiles") or [],
-            developerKeys=row.get("developer_keys") or {},
-            brandKit=row.get("brand_kit") or {},
+            apiKeys=_normalize_json_value(row.get("api_keys"), "list"),
+            linkedAccounts=_normalize_json_value(row.get("linked_accounts"), "list"),
+            profiles=_normalize_json_value(row.get("profiles"), "list"),
+            developerKeys=_normalize_json_value(row.get("developer_keys"), "dict"),
+            brandKit=_normalize_json_value(row.get("brand_kit"), "dict"),
             planTier=row.get("plan_tier") or "starter",
             maxProfiles=row.get("max_profiles") or 50,
             email=row.get("email"),
