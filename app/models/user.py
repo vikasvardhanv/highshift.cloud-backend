@@ -53,6 +53,7 @@ class User(Document):
     linked_accounts: List[LinkedAccount] = Field(default=[], alias="linkedAccounts")
     profiles: List[Profile] = Field(default=[], alias="profiles")
     developer_keys: dict = Field(default={}, alias="developerKeys")
+    brand_kit: dict = Field(default={}, alias="brandKit")
     
     # B2B / Limits
     plan_tier: str = Field(default="starter", alias="planTier")
@@ -91,6 +92,7 @@ class User(Document):
             linkedAccounts=row.get("linked_accounts") or [],
             profiles=row.get("profiles") or [],
             developerKeys=row.get("developer_keys") or {},
+            brandKit=row.get("brand_kit") or {},
             planTier=row.get("plan_tier") or "starter",
             maxProfiles=row.get("max_profiles") or 50,
             email=row.get("email"),
@@ -154,6 +156,7 @@ class User(Document):
                 "linked_accounts": [a.model_dump(by_alias=True) for a in (self.linked_accounts or [])],
                 "profiles": [p.model_dump(by_alias=True) for p in (self.profiles or [])],
                 "developer_keys": self.developer_keys or {},
+                "brand_kit": self.brand_kit or {},
                 "plan_tier": self.plan_tier,
                 "max_profiles": self.max_profiles,
             }
@@ -185,6 +188,7 @@ class User(Document):
                     for p in (self.profiles or [])
                 ],
                 "developer_keys": self.developer_keys or {},
+                "brand_kit": self.brand_kit or {},
                 "plan_tier": self.plan_tier,
                 "max_profiles": self.max_profiles,
             },

@@ -4,12 +4,15 @@ from typing import Optional
 from google import genai
 from google.genai import types
 from openai import AsyncOpenAI
-from app.models.brand_kit import BrandKit
+from app.db.postgres import fetch_user_by_id
 from app.utils.logger import logger
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROK_API_KEY = os.getenv("GROK_API_KEY")
+GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
+GEMINI_INTENT_MODEL = os.getenv("GEMINI_INTENT_MODEL", GEMINI_TEXT_MODEL)
+GROK_TEXT_MODEL = os.getenv("GROK_TEXT_MODEL", "grok-2-latest")
 
 PROVIDER = "gemini" if GEMINI_API_KEY else ("grok" if GROK_API_KEY else "none")
 N8N_INSTANT_WEBHOOK_URL = os.getenv("N8N_INSTANT_WEBHOOK_URL", "https://wfig.app.n8n.cloud/form/1e3df4e4-a0fd-453e-9942-63ee710aeded")
@@ -26,6 +29,41 @@ if GROK_API_KEY:
 
 logger.info(f"AI Service initialized with provider: {PROVIDER}")
 
+
+async def get_brand_context(user_id: str) -> dict:
+    """
+    Brand settings live on the Postgres users.brand_kit JSON column.
+    Generation should still work if the user has not configured Brand Kit yet.
+    """
+    defaults = {
+        "company_name": "our brand",
+        "industry": "",
+        "tone": "Professional",
+        "description": "Professional and engaging",
+        "keywords": [],
+    }
+
+    try:
+        user_row = await fetch_user_by_id(user_id)
+        brand = (user_row or {}).get("brand_kit") or {}
+        if not isinstance(brand, dict):
+            return defaults
+
+        keywords = brand.get("keywords") or []
+        if isinstance(keywords, str):
+            keywords = [item.strip() for item in keywords.split(",") if item.strip()]
+
+        return {
+            "company_name": brand.get("company_name") or defaults["company_name"],
+            "industry": brand.get("industry") or defaults["industry"],
+            "tone": brand.get("tone") or defaults["tone"],
+            "description": brand.get("description") or defaults["description"],
+            "keywords": keywords if isinstance(keywords, list) else [],
+        }
+    except Exception as e:
+        logger.warning(f"Brand context lookup failed for user {user_id}: {e}")
+        return defaults
+
 async def detect_intent(prompt: str) -> str:
     """
     Analyze the user prompt to determine if they want text, an image, or a video.
@@ -36,7 +74,7 @@ async def detect_intent(prompt: str) -> str:
     try:
         if PROVIDER == "gemini" and gemini_client:
             response = await gemini_client.aio.models.generate_content(
-                model="gemini-1.5-flash",
+                model=GEMINI_INTENT_MODEL,
                 contents=f"{system_instruction}\nUser Prompt: {prompt}",
                 config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
@@ -45,7 +83,7 @@ async def detect_intent(prompt: str) -> str:
             
         elif PROVIDER == "grok" and grok_client:
             response = await grok_client.chat.completions.create(
-                model="grok-2-latest",
+                model=GROK_TEXT_MODEL,
                 messages=[
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": prompt}
@@ -106,7 +144,7 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
                 return {
                      "type": "text",
                      "content": f"[Image Generation not supported with Gemini Free Tier yet] I cannot generate the image of '{topic}' directly, but here represents what it might look like...",
-                     "model": "gemini-1.5-flash"
+                     "model": GEMINI_TEXT_MODEL
                 }
 
             try:
@@ -131,14 +169,17 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
             }
 
         # 2. Text Generation (Default)
-        # Fetch Brand Kit
-        brand = await BrandKit.find_one({"userId": user_id})
-        brand_voice = brand.voice_description if brand else "Professional and engaging"
-        brand_name = brand.name if brand else "our brand"
+        brand = await get_brand_context(user_id)
+        brand_name = brand["company_name"]
+        brand_voice = brand["description"]
+        brand_tone = tone or brand["tone"]
+        keyword_text = ", ".join(str(k) for k in brand["keywords"] if k)
 
         system_prompt = f"""
         You are an expert social media ghostwriter for {brand_name}.
         Your brand voice is: {brand_voice}
+        Industry: {brand["industry"] or "general"}
+        Important brand keywords: {keyword_text or "none provided"}
         
         Platform-specific instructions:
         - Twitter/X: Under 280 characters, punchy, use 1-2 hashtags.
@@ -148,24 +189,24 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
         """
 
         user_prompt = f"Write a {platform} post about: {topic}"
-        if tone:
-            user_prompt += f"\nUse a {tone} tone."
+        if brand_tone:
+            user_prompt += f"\nUse a {brand_tone} tone."
 
         content = ""
         model_name = ""
         usage = 0
 
         if PROVIDER == "gemini":
-            model_name = "gemini-1.5-flash"
+            model_name = GEMINI_TEXT_MODEL
             response = await gemini_client.aio.models.generate_content(
                 model=model_name,
                 contents=f"{system_prompt}\n\nTask: {user_prompt}",
             )
-            content = response.text.strip()
+            content = (response.text or "").strip()
             # Usage tracking not always available in same structure, ignoring for now
             
         elif PROVIDER == "grok" and grok_client:
-            model_name = "grok-2-latest"
+            model_name = GROK_TEXT_MODEL
             response = await grok_client.chat.completions.create(
                 model=model_name,
                 messages=[

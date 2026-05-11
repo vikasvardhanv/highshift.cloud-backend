@@ -54,6 +54,7 @@ async def init_postgres(database_url: str) -> bool:
                   linked_accounts jsonb not null default '[]'::jsonb,
                   profiles jsonb not null default '[]'::jsonb,
                   developer_keys jsonb not null default '{}'::jsonb,
+                  brand_kit jsonb not null default '{}'::jsonb,
                   plan_tier text not null default 'starter',
                   max_profiles integer not null default 50,
                   stripe_customer_id text,
@@ -215,6 +216,7 @@ async def init_postgres(database_url: str) -> bool:
                 ("users", "linked_accounts", "add column if not exists linked_accounts jsonb not null default '[]'::jsonb"),
                 ("users", "profiles", "add column if not exists profiles jsonb not null default '[]'::jsonb"),
                 ("users", "developer_keys", "add column if not exists developer_keys jsonb not null default '{}'::jsonb"),
+                ("users", "brand_kit", "add column if not exists brand_kit jsonb not null default '{}'::jsonb"),
                 ("users", "plan_tier", "add column if not exists plan_tier text not null default 'starter'"),
                 ("users", "max_profiles", "add column if not exists max_profiles integer not null default 50"),
                 ("users", "created_at", "add column if not exists created_at timestamptz not null default now()"),
@@ -361,6 +363,7 @@ async def insert_user(data: Dict[str, Any]) -> Dict[str, Any]:
     linked_accounts = json.dumps(data.get("linked_accounts") or [])
     profiles = json.dumps(data.get("profiles") or [])
     developer_keys = json.dumps(data.get("developer_keys") or {})
+    brand_kit = json.dumps(data.get("brand_kit") or {})
     plan_tier = data.get("plan_tier") or "starter"
     max_profiles = int(data.get("max_profiles") or 50)
     full_name = data.get("email", "").split("@")[0] if email else "User"
@@ -417,6 +420,11 @@ async def insert_user(data: Dict[str, Any]) -> Dict[str, Any]:
             col_list.append("developer_keys")
             val_list.append(developer_keys)
             params += 1
+
+        if "brand_kit" in existing_cols:
+            col_list.append("brand_kit")
+            val_list.append(brand_kit)
+            params += 1
             
         if "plan_tier" in existing_cols:
             col_list.append("plan_tier")
@@ -448,10 +456,11 @@ async def update_user(user_id: str, data: Dict[str, Any]) -> Optional[Dict[str, 
             "linked_accounts",
             "profiles",
             "developer_keys",
+            "brand_kit",
             "plan_tier",
             "max_profiles",
         }
-        json_columns = {"api_keys", "linked_accounts", "profiles", "developer_keys"}
+        json_columns = {"api_keys", "linked_accounts", "profiles", "developer_keys", "brand_kit"}
         safe_data = {
             key: value
             for key, value in data.items()

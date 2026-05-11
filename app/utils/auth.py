@@ -106,6 +106,7 @@ class AuthUser(SimpleNamespace):
             "linked_accounts": linked_accounts,
             "profiles": profiles,
             "developer_keys": getattr(self, "developer_keys", {}) or {},
+            "brand_kit": getattr(self, "brand_kit", {}) or {},
             "plan_tier": getattr(self, "plan_tier", "starter"),
             "max_profiles": getattr(self, "max_profiles", 50),
         }
@@ -164,6 +165,7 @@ def _to_auth_user(row: dict) -> AuthUser:
             if isinstance(p, dict)
         ],
         developer_keys=row.get("developer_keys") or {},
+        brand_kit=row.get("brand_kit") or {},
         plan_tier=row.get("plan_tier") or "starter",
         max_profiles=row.get("max_profiles") or 50,
     )
