@@ -59,11 +59,20 @@ class OAuthState(Document):
         row = await get_oauth_state(state_id)
         if not row:
             return None
+        # Normalize extra_data before returning
+        extra_data = row.get("extra_data")
+        if isinstance(extra_data, str):
+            try:
+                extra_data = json.loads(extra_data)
+            except (json.JSONDecodeError, TypeError):
+                extra_data = {}
+        elif not isinstance(extra_data, dict):
+            extra_data = {}
         # Return a lightweight data object instead of trying to instantiate the Beanie Document
         return OAuthStateData(
             state_id=row.get("state_id"),
             code_verifier=row.get("code_verifier"),
-            extra_data=row.get("extra_data"),
+            extra_data=extra_data,
             created_at=row.get("created_at"),
         )
 
