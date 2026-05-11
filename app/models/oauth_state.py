@@ -4,7 +4,7 @@ import os
 from typing import Any
 from typing import Optional
 from beanie import Document
-from pydantic import Field
+from pydantic import Field, field_validator
 from app.db.postgres import (
     delete_oauth_state,
     get_oauth_state,
@@ -17,6 +17,21 @@ class OAuthState(Document):
     code_verifier: Optional[str] = None
     extra_data: dict = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    @field_validator('extra_data', mode='before')
+    @classmethod
+    def normalize_extra_data(cls, v: Any) -> dict:
+        """Normalize extra_data from string or dict to dict"""
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
 
     class Settings:
         name = "oauth_states"
@@ -25,18 +40,6 @@ class OAuthState(Document):
     @staticmethod
     def _use_postgres() -> bool:
         return is_postgres_url(os.getenv("DATABASE_URL"))
-
-    @staticmethod
-    def _normalize_extra_data(value: Any) -> dict:
-        if isinstance(value, dict):
-            return value
-        if isinstance(value, str):
-            try:
-                parsed = json.loads(value)
-                return parsed if isinstance(parsed, dict) else {}
-            except json.JSONDecodeError:
-                return {}
-        return {}
 
     @classmethod
     async def find_one(cls, query):  # type: ignore[override]
@@ -51,7 +54,7 @@ class OAuthState(Document):
         return OAuthState(
             state_id=row.get("state_id"),
             code_verifier=row.get("code_verifier"),
-            extra_data=cls._normalize_extra_data(row.get("extra_data")),
+            extra_data=row.get("extra_data"),
             created_at=row.get("created_at"),
         )
 
