@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import os
+import logging
 from typing import Any, NamedTuple
 from typing import Optional
 from beanie import Document
@@ -11,6 +12,8 @@ from app.db.postgres import (
     insert_oauth_state,
     is_postgres_url,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OAuthStateData(NamedTuple):
@@ -61,20 +64,27 @@ class OAuthState(Document):
             return None
         # Normalize extra_data before returning
         extra_data = row.get("extra_data")
+        logger.debug(f"OAuthState.find_one: raw extra_data type={type(extra_data).__name__}, value={extra_data}")
+        
         if isinstance(extra_data, str):
             try:
                 extra_data = json.loads(extra_data)
-            except (json.JSONDecodeError, TypeError):
+                logger.debug(f"OAuthState.find_one: parsed JSON string to dict")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"OAuthState.find_one: failed to parse JSON string: {e}")
                 extra_data = {}
         elif not isinstance(extra_data, dict):
+            logger.warning(f"OAuthState.find_one: extra_data is {type(extra_data).__name__}, converting to dict")
             extra_data = {}
-        # Return a lightweight data object instead of trying to instantiate the Beanie Document
-        return OAuthStateData(
+        
+        result = OAuthStateData(
             state_id=row.get("state_id"),
             code_verifier=row.get("code_verifier"),
             extra_data=extra_data,
             created_at=row.get("created_at"),
         )
+        logger.debug(f"OAuthState.find_one: returning OAuthStateData with extra_data type={type(result.extra_data).__name__}")
+        return result
 
     async def insert(self, *args, **kwargs):  # type: ignore[override]
         if not self._use_postgres():

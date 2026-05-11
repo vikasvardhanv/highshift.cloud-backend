@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, Body
 from fastapi.responses import RedirectResponse
 import os
+import json
 import uuid
 import datetime
 import logging
@@ -210,7 +211,17 @@ async def oauth_callback(
             if not oauth_data:
                 raise HTTPException(status_code=400, detail="Invalid or expired state")
 
+            # Defensive: ensure extra_data is always a dict
             oauth_extra = oauth_data.extra_data or {}
+            logger.debug(f"oauth_extra type={type(oauth_extra).__name__}, value={oauth_extra}")
+            
+            if isinstance(oauth_extra, str):
+                logger.warning(f"oauth_extra is a string, parsing as JSON: {oauth_extra}")
+                try:
+                    oauth_extra = json.loads(oauth_extra)
+                except (json.JSONDecodeError, TypeError):
+                    oauth_extra = {}
+            
             user_id_from_state = oauth_extra.get("user_id") or user_id_from_state
             profile_id_from_state = oauth_extra.get("profile_id") or profile_id_from_state
             redirect_uri = oauth_extra.get("redirect_uri") or os.getenv("TWITTER_REDIRECT_URI")
