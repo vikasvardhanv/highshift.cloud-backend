@@ -30,7 +30,6 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
     async with httpx.AsyncClient() as client:
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         data = {
-            "client_id": client_id,
             "grant_type": "authorization_code",
             "redirect_uri": redirect_uri,
             "code": code,
@@ -39,6 +38,8 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
         if client_secret:
             auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
             headers["Authorization"] = f"Basic {auth}"
+        else:
+            data["client_id"] = client_id
 
         res = await client.post(
             "https://api.x.com/2/oauth2/token",
@@ -61,13 +62,14 @@ async def refresh_access_token(client_id: str, client_secret: str, refresh_token
     async with httpx.AsyncClient() as client:
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         data = {
-            "client_id": client_id,
             "grant_type": "refresh_token",
             "refresh_token": refresh_token
         }
         if client_secret:
             auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
             headers["Authorization"] = f"Basic {auth}"
+        else:
+            data["client_id"] = client_id
         res = await client.post(
             "https://api.x.com/2/oauth2/token",
             headers=headers,
