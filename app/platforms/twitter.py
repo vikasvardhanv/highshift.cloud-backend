@@ -74,6 +74,8 @@ async def refresh_access_token(client_id: str, client_secret: str, refresh_token
             data=data
         )
         logger.info("Twitter token refresh status=%s", res.status_code)
+        if res.status_code >= 400:
+            logger.warning("Twitter token refresh failed response: %s", res.text[:1000])
         res.raise_for_status()
         return res.json()
 

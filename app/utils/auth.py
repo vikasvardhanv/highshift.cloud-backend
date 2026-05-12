@@ -70,6 +70,8 @@ class AuthUser(SimpleNamespace):
                             if hasattr(getattr(a, "expires_at", None), "isoformat")
                             else getattr(a, "expires_at", None)
                         ),
+                        "scope": getattr(a, "scope", None),
+                        "tokenType": getattr(a, "token_type", None),
                         "profileId": getattr(a, "profile_id", None),
                         "rawProfile": getattr(a, "raw_profile", None),
                         "picture": getattr(a, "picture", None),
@@ -153,6 +155,8 @@ def _to_auth_user(row: dict) -> AuthUser:
                 access_token_enc=item.get("accessTokenEnc") or item.get("access_token_enc"),
                 refresh_token_enc=item.get("refreshTokenEnc") or item.get("refresh_token_enc"),
                 expires_at=_normalize_datetime(item.get("expiresAt") or item.get("expires_at")),
+                scope=item.get("scope"),
+                token_type=item.get("tokenType") or item.get("token_type"),
                 profile_id=item.get("profileId") or item.get("profile_id"),
                 raw_profile=item.get("rawProfile") or item.get("raw_profile"),
                 picture=item.get("picture"),

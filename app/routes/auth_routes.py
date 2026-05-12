@@ -273,19 +273,6 @@ async def oauth_callback(
             username = user_data.get("username")
             display_name = user_data.get("name")
             
-            # Prepare LinkedAccount
-            linked_account = LinkedAccount(
-                platform="twitter",
-                accountId=account_id,
-                username=username,
-                displayName=display_name,
-                accessTokenEnc=encrypt_token(access_token),
-                refreshTokenEnc=encrypt_token(token_data.get("refresh_token")) if token_data.get("refresh_token") else None,
-                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 7200)),
-                rawProfile=profile,
-                profileId=profile_id_from_state # Assign profile
-            )
-
             # 4. Find or Create User
             api_key_to_return = None
             user = None
@@ -300,6 +287,32 @@ async def oauth_callback(
                     "linkedAccounts.accountId": account_id
                 })
 
+            existing_account = None
+            if user:
+                existing_account = next((a for a in user.linked_accounts if a.platform == "twitter" and a.account_id == account_id), None)
+
+            refresh_token = token_data.get("refresh_token")
+            if refresh_token:
+                refresh_token_enc = encrypt_token(refresh_token)
+            elif existing_account and existing_account.refresh_token_enc:
+                refresh_token_enc = existing_account.refresh_token_enc
+            else:
+                refresh_token_enc = None
+
+            linked_account = LinkedAccount(
+                platform="twitter",
+                accountId=account_id,
+                username=username,
+                displayName=display_name,
+                accessTokenEnc=encrypt_token(access_token),
+                refreshTokenEnc=refresh_token_enc,
+                expiresAt=datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data.get("expires_in", 7200)),
+                scope=token_data.get("scope") or " ".join((oauth_extra.get("scopes") or [])),
+                tokenType=token_data.get("token_type"),
+                rawProfile=profile,
+                profileId=profile_id_from_state # Assign profile
+            )
+
             if not user:
                 # Create NEW USER and generate API KEY
                 api_key_to_return = f"hs_{uuid.uuid4().hex}"
@@ -310,10 +323,6 @@ async def oauth_callback(
                 await user.insert()
             else:
                 # Update existing user
-                
-                # Check if this specific account is already linked (update case)
-                existing_account = next((a for a in user.linked_accounts if a.platform == "twitter" and a.account_id == account_id), None)
-                
                 if not existing_account:
                     # New account - Check Limits
                     if len(user.linked_accounts) >= user.max_profiles:
