@@ -86,7 +86,13 @@ def get_frontend_url() -> str:
         frontend_url = origins[0] if origins and origins[0] else "https://highshift.cloud"
 
     # Legacy safety for prior deployments
-    if "socialraven.meganai.cloud" in frontend_url and frontend_url.startswith("http://"):
+    if (
+        frontend_url.startswith("http://")
+        and (
+            "socialraven.meganai.cloud" in frontend_url
+            or "socialraven.online" in frontend_url
+        )
+    ):
         frontend_url = frontend_url.replace("http://", "https://")
     return frontend_url
 

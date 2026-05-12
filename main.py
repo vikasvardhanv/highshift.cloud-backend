@@ -128,7 +128,7 @@ env_origins = os.getenv("CORS_ORIGINS", "").split(",")
 origins = [o.strip().rstrip("/") for o in env_origins if o.strip()]
 origin_regex = os.getenv(
     "CORS_ORIGIN_REGEX",
-    r"^https://([a-z0-9-]+\.)*highshift\.cloud$|^https://highshift-cloud-frontend.*\.vercel\.app$",
+    r"^https://([a-z0-9-]+\.)*highshift\.cloud$|^https://(www\.)?socialraven\.online$|^https://highshift-cloud-frontend.*\.vercel\.app$",
 )
 origin_re = re.compile(origin_regex)
 
@@ -141,6 +141,8 @@ production_domains = [
     "https://socialraven.meganai.cloud",
     "https://www.socialraven.meganai.cloud",
     "https://socialraven.meganai.cloud.vercel.app",
+    "https://socialraven.online",
+    "https://www.socialraven.online",
 ]
 for d in production_domains:
     normalized = d.rstrip("/")
