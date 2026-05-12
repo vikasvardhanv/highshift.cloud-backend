@@ -8,9 +8,13 @@ router = APIRouter(prefix="/cron", tags=["Cron"])
 
 def verify_cron_secret(request: Request):
     """Verify the request is from Vercel Cron or has valid secret."""
-    # Vercel Cron Jobs include this header
+    # Support both our legacy header check and Vercel's cron user-agent.
     vercel_cron_header = request.headers.get("x-vercel-cron")
     if vercel_cron_header:
+        return True
+
+    user_agent = request.headers.get("user-agent", "").lower()
+    if user_agent.startswith("vercel-cron"):
         return True
     
     # Fallback: check for manual secret

@@ -13,10 +13,24 @@ router = APIRouter(prefix="/schedule", tags=["Schedule"])
 def _iso(value):
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
+
+async def _process_due_posts_safely(limit: int = 10):
+    try:
+        from app.services.postgres_scheduler_service import process_due_posts
+        stats = await process_due_posts(limit=limit)
+        if stats.get("processed"):
+            logger.info("Processed due scheduled posts from schedule route: %s", stats)
+        return stats
+    except Exception as e:
+        logger.error("Failed to process due scheduled posts from schedule route: %s", e, exc_info=True)
+        return {"processed": 0, "published": 0, "failed": 0, "error": str(e)}
+
+
 @router.get("")
 async def get_schedule(
     user: AuthUser = Depends(get_current_user)
 ):
+    await _process_due_posts_safely(limit=10)
     posts = await list_scheduled_posts(str(user.id))
     return {
         "posts": [
@@ -118,6 +132,15 @@ async def delete_scheduled_post(
     return {"success": True}
 
 
+@router.post("/process-due")
+@router.get("/process-due")
+async def process_due_scheduled_posts(
+    user: AuthUser = Depends(get_current_user)
+):
+    stats = await _process_due_posts_safely(limit=25)
+    return {"success": True, "stats": stats}
+
+
 # ============ NEW: Calendar View Endpoint ============
 @router.get("/calendar")
 async def get_schedule_calendar(
@@ -126,6 +149,7 @@ async def get_schedule_calendar(
     """
     Returns scheduled posts grouped by date for calendar display.
     """
+    await _process_due_posts_safely(limit=10)
     posts = await list_scheduled_posts(str(user.id))
     
     # Return flat list, let frontend handle grouping by local timezone
