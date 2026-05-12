@@ -239,41 +239,32 @@ async def publish_content(
             
             # --- TWITTER ---
             if platform == "twitter":
-                # Check expiry and refresh if needed
+                async def refresh_twitter_token():
+                    refresh_token = decrypt_token(account.refresh_token_enc)
+                    new_tokens = await twitter.refresh_access_token(
+                        client_id=os.getenv("TWITTER_CLIENT_ID"),
+                        client_secret=os.getenv("TWITTER_CLIENT_SECRET"),
+                        refresh_token=refresh_token
+                    )
+                    refreshed_token = new_tokens["access_token"]
+                    account.access_token_enc = encrypt_token(refreshed_token)
+                    if new_tokens.get("refresh_token"):
+                        account.refresh_token_enc = encrypt_token(new_tokens["refresh_token"])
+                    account.expires_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=new_tokens.get("expires_in", 7200))
+                    await user.save()
+                    return refreshed_token
+
                 expires_at = _as_naive_utc_datetime(getattr(account, "expires_at", None))
                 account.expires_at = expires_at
                 if expires_at and expires_at < datetime.datetime.utcnow():
                     if account.refresh_token_enc:
                         try:
-                            refresh_token = decrypt_token(account.refresh_token_enc)
-                            new_tokens = await twitter.refresh_access_token(
-                                client_id=os.getenv("TWITTER_CLIENT_ID"),
-                                client_secret=os.getenv("TWITTER_CLIENT_SECRET"),
-                                refresh_token=refresh_token
-                            )
-                            token = new_tokens["access_token"]
-                            account.access_token_enc = encrypt_token(token)
-                            if new_tokens.get("refresh_token"):
-                                account.refresh_token_enc = encrypt_token(new_tokens["refresh_token"])
-                            account.expires_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=new_tokens.get("expires_in", 7200))
-                            await user.save()
+                            token = await refresh_twitter_token()
                         except Exception as refresh_error:
                             logger.error(f"Twitter token refresh failed: {refresh_error}")
-                            results.append({
-                                "platform": "twitter", 
-                                "status": "failed", 
-                                "error": "Your Twitter session has expired. Please reconnect Twitter from your dashboard.",
-                                "action_required": "reconnect"
-                            })
-                            continue
+                            logger.warning("Twitter refresh failed; attempting publish once with existing token")
                     else:
-                        results.append({
-                            "platform": "twitter", 
-                            "status": "failed", 
-                            "error": "Your Twitter session has expired. Please reconnect Twitter from your dashboard.",
-                            "action_required": "reconnect"
-                        })
-                        continue
+                        logger.warning("Twitter token is expired and no refresh token is stored; attempting publish once with existing token")
 
                 media_ids = []
                 # Use processed paths (includes temp files from base64 conversion)
@@ -289,7 +280,14 @@ async def publish_content(
                         )
                         media_ids.append(media_id)
                 
-                res = await twitter.post_tweet(token, content, media_ids=media_ids)
+                try:
+                    res = await twitter.post_tweet(token, content, media_ids=media_ids)
+                except Exception as post_error:
+                    if not account.refresh_token_enc:
+                        raise
+                    logger.warning("Twitter post failed; refreshing token and retrying once: %s", post_error)
+                    token = await refresh_twitter_token()
+                    res = await twitter.post_tweet(token, content, media_ids=media_ids)
                 results.append({"platform": "twitter", "status": "success", "id": res.get("data", {}).get("id")})
                 await insert_activity(str(user.id), "Posted to Twitter", platform="Twitter", type_="success")
 

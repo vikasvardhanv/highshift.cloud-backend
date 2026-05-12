@@ -42,6 +42,13 @@ async def _publish_claimed_post(post: Dict[str, Any]) -> Dict[str, Any]:
                 for item in failures
             )
             await mark_scheduled_post_failed(str(post["id"]), error)
+            await insert_activity(
+                user_id=str(user.id),
+                title=f"Scheduled post failed: {error[:120]}",
+                type_="error",
+                platform="System",
+                meta={"postId": str(post["id"]), "error": error},
+            )
             return {"status": "failed", "error": error, "result": result}
 
         await mark_scheduled_post_published(str(post["id"]), result)
