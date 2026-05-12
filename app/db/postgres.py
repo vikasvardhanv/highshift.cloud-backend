@@ -700,6 +700,16 @@ def _normalize_scheduled_post(row: Optional[asyncpg.Record]) -> Optional[Dict[st
     return data
 
 
+def _coerce_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    raise TypeError(f"Expected datetime-compatible value, got {type(value).__name__}")
+
+
 async def create_scheduled_post(
     user_id: str,
     content: str,
@@ -707,6 +717,7 @@ async def create_scheduled_post(
     scheduled_for_iso: str,
     media: list,
 ) -> Dict[str, Any]:
+    scheduled_for = _coerce_datetime(scheduled_for_iso)
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
@@ -721,7 +732,7 @@ async def create_scheduled_post(
                 str(user_id),
                 content or "",
                 _json_dumps(accounts or []),
-                scheduled_for_iso,
+                scheduled_for,
                 _json_dumps(media or []),
             )
             return _normalize_scheduled_post(row) or {}
@@ -744,7 +755,7 @@ async def create_scheduled_post(
                 str(user_id),
                 content or "",
                 _json_dumps(accounts or []),
-                scheduled_for_iso,
+                scheduled_for,
                 _json_dumps(media or []),
             )
     return _normalize_scheduled_post(row) or {}
