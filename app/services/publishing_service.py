@@ -239,6 +239,8 @@ async def publish_content(
             
             # --- TWITTER ---
             if platform == "twitter":
+                refresh_failed = False
+
                 async def refresh_twitter_token():
                     refresh_token = decrypt_token(account.refresh_token_enc)
                     new_tokens = await twitter.refresh_access_token(
@@ -261,6 +263,7 @@ async def publish_content(
                         try:
                             token = await refresh_twitter_token()
                         except Exception as refresh_error:
+                            refresh_failed = True
                             logger.error(f"Twitter token refresh failed: {refresh_error}")
                             logger.warning("Twitter refresh failed; attempting publish once with existing token")
                     else:
@@ -283,6 +286,8 @@ async def publish_content(
                 try:
                     res = await twitter.post_tweet(token, content, media_ids=media_ids)
                 except Exception as post_error:
+                    if refresh_failed:
+                        raise Exception("Twitter token refresh failed. Please reconnect Twitter and schedule again.") from post_error
                     if not account.refresh_token_enc:
                         raise
                     logger.warning("Twitter post failed; refreshing token and retrying once: %s", post_error)

@@ -5,6 +5,16 @@ import os
 import urllib.parse
 from app.utils.logger import logger
 
+
+def _clean_credential(value: str | None) -> str:
+    return (value or "").strip().strip('"').strip("'")
+
+
+def _basic_auth_header(client_id: str, client_secret: str) -> str:
+    auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    return f"Basic {auth}"
+
+
 def generate_pkce_pair():
     """Generate code verifier and challenge for PKCE."""
     # X follows RFC 7636: code_verifier must be 43-128 characters.
@@ -28,6 +38,8 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str, code_verifier: str):
     async with httpx.AsyncClient() as client:
+        client_id = _clean_credential(client_id)
+        client_secret = _clean_credential(client_secret)
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         data = {
             "grant_type": "authorization_code",
@@ -36,8 +48,7 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
             "code_verifier": code_verifier
         }
         if client_secret:
-            auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-            headers["Authorization"] = f"Basic {auth}"
+            headers["Authorization"] = _basic_auth_header(client_id, client_secret)
         else:
             data["client_id"] = client_id
 
@@ -47,6 +58,16 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
             data=data
         )
         logger.info("Twitter token exchange status=%s", res.status_code)
+        if res.status_code >= 400 and client_secret:
+            logger.warning("Twitter confidential token exchange failed; retrying public PKCE token exchange")
+            headers.pop("Authorization", None)
+            data["client_id"] = client_id
+            res = await client.post(
+                "https://api.x.com/2/oauth2/token",
+                headers=headers,
+                data=data
+            )
+            logger.info("Twitter public token exchange retry status=%s", res.status_code)
         res.raise_for_status()
         token_data = res.json()
         logger.info(
@@ -60,14 +81,16 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
 async def refresh_access_token(client_id: str, client_secret: str, refresh_token: str):
     """Refresh an expired Twitter access token using the refresh token."""
     async with httpx.AsyncClient() as client:
+        client_id = _clean_credential(client_id)
+        client_secret = _clean_credential(client_secret)
+        refresh_token = _clean_credential(refresh_token)
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         data = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token
         }
         if client_secret:
-            auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-            headers["Authorization"] = f"Basic {auth}"
+            headers["Authorization"] = _basic_auth_header(client_id, client_secret)
         else:
             data["client_id"] = client_id
         res = await client.post(
@@ -78,6 +101,18 @@ async def refresh_access_token(client_id: str, client_secret: str, refresh_token
         logger.info("Twitter token refresh status=%s", res.status_code)
         if res.status_code >= 400:
             logger.warning("Twitter token refresh failed response: %s", res.text[:1000])
+            if client_secret:
+                logger.warning("Twitter confidential refresh failed; retrying public PKCE refresh")
+                headers.pop("Authorization", None)
+                data["client_id"] = client_id
+                res = await client.post(
+                    "https://api.x.com/2/oauth2/token",
+                    headers=headers,
+                    data=data
+                )
+                logger.info("Twitter public token refresh retry status=%s", res.status_code)
+                if res.status_code >= 400:
+                    logger.warning("Twitter public token refresh failed response: %s", res.text[:1000])
         res.raise_for_status()
         return res.json()
 
