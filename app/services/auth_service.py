@@ -344,12 +344,11 @@ async def get_platform_connect_payload(
         redirect_uri = _platform_redirect_uri("instagram", "INSTAGRAM_REDIRECT_URI", default_redirect_uri)
         default_scopes = [
             "instagram_basic",
-            "instagram_content_publish",
             "pages_show_list",
             "pages_read_engagement",
+            "instagram_content_publish",
         ]
-        env_scopes = os.getenv("INSTAGRAM_SCOPES", "").split(",")
-        final_scopes = list(set(default_scopes + [s for s in env_scopes if s]))
+        final_scopes = _split_scope_env(os.getenv("INSTAGRAM_SCOPES"), default_scopes)
         await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, final_scopes)
         return {
             "authUrl": await instagram.get_auth_url(
@@ -399,17 +398,10 @@ async def get_platform_connect_payload(
         default_scopes = [
             "public_profile",
             "pages_show_list",
-            "pages_manage_posts",
             "pages_read_engagement",
-            "pages_manage_metadata",
-            "pages_read_user_content",
-            "business_management",
-            "read_insights",
+            "pages_manage_posts",
         ]
-        env_scopes = os.getenv("FACEBOOK_SCOPES", "").split(",")
-        final_scopes = list(
-            set(default_scopes + [s for s in env_scopes if s and "instagram" not in s])
-        )
+        final_scopes = _split_scope_env(os.getenv("FACEBOOK_SCOPES"), default_scopes)
         await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, final_scopes)
         return {
             "authUrl": await facebook.get_auth_url(
@@ -438,8 +430,7 @@ async def get_platform_connect_payload(
             "profile",
             "email",
         ]
-        env_scopes = os.getenv("YOUTUBE_GOOGLE_SCOPES", "").split(",")
-        final_scopes = list(set(default_scopes + [s for s in env_scopes if s]))
+        final_scopes = _split_scope_env(os.getenv("YOUTUBE_GOOGLE_SCOPES"), default_scopes)
         await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, final_scopes)
         return {
             "authUrl": await youtube.get_auth_url(

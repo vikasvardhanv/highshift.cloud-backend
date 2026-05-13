@@ -1,4 +1,5 @@
 import httpx
+from urllib.parse import urlencode
 from app.utils.logger import logger
 
 async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: list):
@@ -9,7 +10,7 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
         "response_type": "code",
         "scope": ",".join(scopes)
     }
-    return f"https://www.facebook.com/v19.0/dialog/oauth?{'&'.join([f'{k}={v}' for k,v in params.items()])}"
+    return f"https://www.facebook.com/v19.0/dialog/oauth?{urlencode(params)}"
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):
     async with httpx.AsyncClient() as client:
