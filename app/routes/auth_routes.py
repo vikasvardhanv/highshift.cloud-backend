@@ -369,6 +369,82 @@ async def oauth_callback(
             if not user_access_token:
                  return RedirectResponse(f"{frontend_url}/auth/callback?error=Failed to get Access Token from Facebook.")
 
+            requested_scopes = set(oauth_extra.get("scopes") or [])
+            page_scopes_requested = bool(
+                requested_scopes
+                & {"pages_show_list", "pages_manage_posts", "pages_read_engagement"}
+            )
+
+            if not page_scopes_requested:
+                fb_profile = await facebook.get_me(user_access_token)
+                account_id = fb_profile.get("id")
+                display_name = fb_profile.get("name") or "Facebook User"
+
+                user = await User.get(user_id_from_state) if user_id_from_state else None
+                if not user:
+                    user = await User.find_one({
+                        "linkedAccounts.platform": "facebook",
+                        "linkedAccounts.accountId": account_id,
+                    })
+
+                api_key_to_return = None
+                new_user = False
+                if not user:
+                    api_key_to_return = f"hs_{uuid.uuid4().hex}"
+                    user = User.build(
+                        apiKeyHash=hash_key(api_key_to_return),
+                        linkedAccounts=[],
+                    )
+                    new_user = True
+
+                existing_account = next(
+                    (
+                        a for a in user.linked_accounts
+                        if a.platform == "facebook" and a.account_id == account_id
+                    ),
+                    None,
+                )
+                if not existing_account and len(user.linked_accounts) >= user.max_profiles:
+                    return RedirectResponse(f"{frontend_url}/auth/callback?error=Plan Limit Reached")
+
+                linked_account = LinkedAccount(
+                    platform="facebook",
+                    accountId=account_id,
+                    username=display_name,
+                    displayName=display_name,
+                    accessTokenEnc=encrypt_token(user_access_token),
+                    expiresAt=None,
+                    scope=",".join(sorted(requested_scopes)) or "public_profile",
+                    rawProfile=fb_profile,
+                    profileId=profile_id_from_state,
+                )
+                user.linked_accounts = [
+                    a for a in user.linked_accounts
+                    if not (a.platform == "facebook" and a.account_id == account_id)
+                ]
+                user.linked_accounts.append(linked_account)
+
+                if new_user:
+                    await user.insert()
+                else:
+                    await user.save()
+
+                jwt_token = create_access_token(data={"sub": str(user.id)})
+                redirect_params = {
+                    "platform": "facebook",
+                    "count": "1",
+                    "token": jwt_token,
+                }
+                if profile_id_from_state:
+                    redirect_params["profileId"] = profile_id_from_state
+                if api_key_to_return:
+                    redirect_params["apiKey"] = api_key_to_return
+                if oauth_state_for_cleanup:
+                    await oauth_state_for_cleanup.delete()
+                return RedirectResponse(
+                    url=f"{frontend_url}/auth/callback?{urlencode(redirect_params)}"
+                )
+
 
             # DEBUG: Check denied permissions
             perms = await facebook.get_permissions(user_access_token)
@@ -376,7 +452,10 @@ async def oauth_callback(
             
             # Check if required permissions are granted
             granted_perms = [p.get('permission') for p in perms if p.get('status') == 'granted']
-            required_perms = ['pages_show_list', 'pages_manage_posts']
+            required_perms = [
+                p for p in ['pages_show_list', 'pages_manage_posts']
+                if p in requested_scopes
+            ]
             missing_perms = [p for p in required_perms if p not in granted_perms]
             
             if missing_perms:
