@@ -171,6 +171,7 @@ async def get_schedule_calendar(
                 ],
                 "status": post.get("status"),
                 "media": post.get("media") or [],
+                "error": post.get("error"),
             })
         except Exception:
             continue
