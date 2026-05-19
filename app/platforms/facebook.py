@@ -37,6 +37,22 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
             raise Exception(f"Facebook token exchange failed: {_extract_fb_error(res)}")
         return res.json()
 
+async def exchange_long_lived_token(client_id: str, client_secret: str, user_access_token: str) -> str:
+    """Exchange a short-lived user access token for a long-lived user access token."""
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            "https://graph.facebook.com/v19.0/oauth/access_token",
+            params={
+                "grant_type": "fb_exchange_token",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "fb_exchange_token": user_access_token
+            }
+        )
+        if res.status_code != 200:
+            raise Exception(f"Facebook long-lived token exchange failed: {_extract_fb_error(res)}")
+        return res.json().get("access_token")
+
 async def post_to_page(access_token: str, page_id: str, message: str, link: str = None):
     async with httpx.AsyncClient() as client:
         params = {

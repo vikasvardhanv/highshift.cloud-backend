@@ -369,6 +369,16 @@ async def oauth_callback(
             if not user_access_token:
                  return RedirectResponse(f"{frontend_url}/auth/callback?error=Failed to get Access Token from Facebook.")
 
+            try:
+                long_lived_token = await facebook.exchange_long_lived_token(
+                    client_id=os.getenv("FACEBOOK_APP_ID"),
+                    client_secret=os.getenv("FACEBOOK_APP_SECRET"),
+                    user_access_token=user_access_token
+                )
+                user_access_token = long_lived_token
+            except Exception as e:
+                logger.error(f"Failed to exchange long-lived Facebook token: {e}")
+
             requested_scopes = set(oauth_extra.get("scopes") or [])
             page_scopes_requested = bool(
                 requested_scopes
@@ -566,6 +576,16 @@ async def oauth_callback(
                 code=code
             )
             user_access_token = token_data.get("access_token")
+
+            try:
+                long_lived_token = await facebook.exchange_long_lived_token(
+                    client_id=os.getenv("FACEBOOK_APP_ID"),
+                    client_secret=os.getenv("FACEBOOK_APP_SECRET"),
+                    user_access_token=user_access_token
+                )
+                user_access_token = long_lived_token
+            except Exception as e:
+                logger.error(f"Failed to exchange long-lived Instagram token: {e}")
             
             # 2. Get Pages & Linked Instagram Accounts
             # We rely on facebook.get_accounts because the token allows access to /me/accounts

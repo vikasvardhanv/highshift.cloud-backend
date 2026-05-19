@@ -87,12 +87,11 @@ async def refresh_access_token(client_id: str, client_secret: str, refresh_token
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         data = {
             "grant_type": "refresh_token",
-            "refresh_token": refresh_token
+            "refresh_token": refresh_token,
+            "client_id": client_id
         }
         if client_secret:
             headers["Authorization"] = _basic_auth_header(client_id, client_secret)
-        else:
-            data["client_id"] = client_id
         res = await client.post(
             "https://api.x.com/2/oauth2/token",
             headers=headers,
