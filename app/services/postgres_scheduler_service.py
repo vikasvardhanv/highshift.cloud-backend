@@ -62,7 +62,15 @@ async def _publish_claimed_post(post: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "published", "result": result}
     except Exception as e:
         logger.error("Scheduled post %s failed: %s", post["id"], e, exc_info=True)
-        await mark_scheduled_post_failed(str(post["id"]), str(e))
+        error = str(e)
+        await mark_scheduled_post_failed(str(post["id"]), error)
+        await insert_activity(
+            user_id=str(user.id),
+            title=f"Scheduled post failed: {error[:120]}",
+            type_="error",
+            platform="System",
+            meta={"postId": str(post["id"]), "error": error},
+        )
         return {"status": "failed", "error": str(e)}
 
 

@@ -541,6 +541,7 @@ async def oauth_callback(
                     picture=p_pic,
                     accessTokenEnc=encrypt_token(p_token), # Store PAGE Token
                     expiresAt=None, # Page tokens last forever? Or until user password change.
+                    scope=",".join(sorted(requested_scopes)),
                     rawProfile=page,
                     profileId=profile_id_from_state
                 )

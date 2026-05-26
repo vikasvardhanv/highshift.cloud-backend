@@ -119,6 +119,23 @@ def validate_platform_content(platform: str, content: str, has_media: bool, is_v
     
     return None
 
+
+def _scope_set(scope_value: Optional[str]) -> set[str]:
+    if not scope_value:
+        return set()
+    return {scope for scope in re.split(r"[\s,]+", scope_value) if scope}
+
+
+def _account_label(account) -> str:
+    username = getattr(account, "username", None)
+    platform = getattr(account, "platform", None) or "account"
+    return f"{platform} @{username}" if username else platform
+
+
+def _is_expired(value) -> bool:
+    expires_at = _as_naive_utc_datetime(value)
+    return bool(expires_at and expires_at < datetime.datetime.utcnow())
+
 async def publish_content(
     user: User, 
     content: str, 
@@ -227,6 +244,31 @@ async def publish_content(
             continue
             
         try:
+            if not getattr(account, "access_token_enc", None):
+                results.append({
+                    "platform": platform,
+                    "status": "failed",
+                    "error": f"{_account_label(account)} is missing an access token. Reconnect this account.",
+                })
+                continue
+
+            if platform == "twitter":
+                scopes = _scope_set(getattr(account, "scope", None))
+                if scopes and "tweet.write" not in scopes:
+                    results.append({
+                        "platform": platform,
+                        "status": "failed",
+                        "error": f"{_account_label(account)} is missing tweet.write permission. Reconnect Twitter and approve write access.",
+                    })
+                    continue
+                if _is_expired(getattr(account, "expires_at", None)) and not getattr(account, "refresh_token_enc", None):
+                    results.append({
+                        "platform": platform,
+                        "status": "failed",
+                        "error": f"{_account_label(account)} authorization expired and cannot be refreshed. Reconnect Twitter.",
+                    })
+                    continue
+
             token = decrypt_token(account.access_token_enc)
             
             # Validate content meets platform requirements
