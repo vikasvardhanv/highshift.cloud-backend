@@ -277,27 +277,35 @@ async def google_login_callback_redirect(code: str) -> str:
     backend_redirect_uri = f"{get_backend_url()}/auth/google/callback"
     frontend_url = get_frontend_url()
 
-    async with httpx.AsyncClient() as client:
-        token_res = await client.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "code": code,
-                "grant_type": "authorization_code",
-                "redirect_uri": backend_redirect_uri,
-            },
-        )
-        token_data = token_res.json()
-        if "error" in token_data:
-            return f"{frontend_url}/login?error=google_auth_failed"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            token_res = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": backend_redirect_uri,
+                },
+            )
+            token_data = token_res.json()
+            if "error" in token_data:
+                logger.error(f"Google OAuth token exchange error: {token_data}")
+                return f"{frontend_url}/login?error=google_auth_failed"
 
-        access_token = token_data["access_token"]
-        user_info_res = await client.get(
-            "https://www.googleapis.com/oauth2/v2/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        user_info = user_info_res.json()
+            access_token = token_data["access_token"]
+            user_info_res = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            user_info = user_info_res.json()
+    except httpx.TimeoutException as e:
+        logger.error(f"Google OAuth request timed out: {e}")
+        return f"{frontend_url}/login?error=google_auth_timeout"
+    except Exception as e:
+        logger.error(f"Google OAuth request failed: {e}")
+        return f"{frontend_url}/login?error=google_auth_failed"
 
     google_id = user_info["id"]
     email = user_info["email"]
