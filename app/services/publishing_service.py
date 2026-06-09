@@ -136,6 +136,36 @@ def _is_expired(value) -> bool:
     expires_at = _as_naive_utc_datetime(value)
     return bool(expires_at and expires_at < datetime.datetime.utcnow())
 
+
+def _raw_profile(account) -> dict:
+    raw = getattr(account, "raw_profile", None)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _facebook_publish_preflight_error(account) -> Optional[str]:
+    scopes = _scope_set(getattr(account, "scope", None))
+    missing_scopes = [
+        scope
+        for scope in ("pages_manage_posts", "pages_read_engagement")
+        if scopes and scope not in scopes
+    ]
+    if missing_scopes:
+        return (
+            f"{_account_label(account)} is missing Facebook publishing permission "
+            f"({', '.join(missing_scopes)}). Reconnect Facebook and grant Page publishing access."
+        )
+
+    tasks = _raw_profile(account).get("tasks")
+    if isinstance(tasks, list):
+        normalized_tasks = {str(task).upper() for task in tasks}
+        if normalized_tasks and not ({"CREATE_CONTENT", "MANAGE"} & normalized_tasks):
+            return (
+                f"{_account_label(account)} does not have a Facebook Page role that can publish. "
+                "Reconnect with a Page admin/editor account or grant this user Create content access."
+            )
+
+    return None
+
 async def publish_content(
     user: User, 
     content: str, 
@@ -269,6 +299,23 @@ async def publish_content(
                     })
                     continue
 
+            if platform == "facebook":
+                facebook_error = _facebook_publish_preflight_error(account)
+                if facebook_error:
+                    results.append({
+                        "platform": platform,
+                        "status": "failed",
+                        "error": facebook_error,
+                    })
+                    await insert_activity(
+                        str(user.id),
+                        "Facebook publishing permission needed",
+                        platform="facebook",
+                        type_="error",
+                        meta={"error": facebook_error},
+                    )
+                    continue
+
             token = decrypt_token(account.access_token_enc)
             
             # Validate content meets platform requirements
@@ -284,6 +331,8 @@ async def publish_content(
                 refresh_failed = False
 
                 async def refresh_twitter_token():
+                    if not account.refresh_token_enc:
+                        raise Exception("Twitter authorization expired. Reconnect Twitter and schedule again.")
                     refresh_token = decrypt_token(account.refresh_token_enc)
                     new_tokens = await twitter.refresh_access_token(
                         client_id=os.getenv("TWITTER_CLIENT_ID"),
@@ -328,7 +377,7 @@ async def publish_content(
                 try:
                     res = await twitter.post_tweet(token, content, media_ids=media_ids)
                 except Exception as post_error:
-                    if refresh_failed:
+                    if refresh_failed or "unauthorized" in str(post_error).lower() or "invalid token" in str(post_error).lower():
                         raise Exception("Twitter token refresh failed. Please reconnect Twitter and schedule again.") from post_error
                     if not account.refresh_token_enc:
                         raise

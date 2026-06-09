@@ -30,6 +30,21 @@ if GROK_API_KEY:
 logger.info(f"AI Service initialized with provider: {PROVIDER}")
 
 
+def _provider_error_message(error: Exception) -> str:
+    """Return a safe, actionable message without leaking provider internals."""
+    raw = str(error)
+    lowered = raw.lower()
+
+    if "api_key_invalid" in lowered or "api key expired" in lowered or "api key not valid" in lowered:
+        return "The AI provider API key is expired or invalid. Please update the AI API key and try again."
+    if "permission" in lowered or "forbidden" in lowered or "unauthorized" in lowered:
+        return "The AI provider rejected the request. Please check the configured AI API key permissions."
+    if "quota" in lowered or "rate limit" in lowered or "resource_exhausted" in lowered:
+        return "The AI provider quota or rate limit was reached. Please try again later or use another provider key."
+
+    return "AI generation failed. Please try again in a moment."
+
+
 async def get_brand_context(user_id: str) -> dict:
     """
     Brand settings live on the Postgres users.brand_kit JSON column.
@@ -198,12 +213,28 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
 
         if PROVIDER == "gemini":
             model_name = GEMINI_TEXT_MODEL
-            response = await gemini_client.aio.models.generate_content(
-                model=model_name,
-                contents=f"{system_prompt}\n\nTask: {user_prompt}",
-            )
-            content = (response.text or "").strip()
-            # Usage tracking not always available in same structure, ignoring for now
+            try:
+                response = await gemini_client.aio.models.generate_content(
+                    model=model_name,
+                    contents=f"{system_prompt}\n\nTask: {user_prompt}",
+                )
+                content = (response.text or "").strip()
+                # Usage tracking not always available in same structure, ignoring for now
+            except Exception as gemini_error:
+                if not grok_client:
+                    raise
+                logger.warning(f"Gemini generation failed; falling back to Grok: {gemini_error}")
+                model_name = GROK_TEXT_MODEL
+                response = await grok_client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7
+                )
+                content = response.choices[0].message.content.strip()
+                usage = response.usage.total_tokens if response.usage else 0
             
         elif PROVIDER == "grok" and grok_client:
             model_name = GROK_TEXT_MODEL
@@ -216,7 +247,7 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
                 temperature=0.7
             )
             content = response.choices[0].message.content.strip()
-            usage = response.usage.total_tokens
+            usage = response.usage.total_tokens if response.usage else 0
 
         else:
             return {
@@ -236,8 +267,8 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
         logger.error(f"AI Generation failed: {e}")
         return {
             "type": "error",
-            "content": f"Failed to generate content: {str(e)}",
-            "error": str(e),
+            "content": _provider_error_message(e),
+            "error": _provider_error_message(e),
             "model": "fallback"
         }
 
