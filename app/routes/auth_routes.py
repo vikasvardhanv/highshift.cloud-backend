@@ -116,6 +116,99 @@ async def debug_facebook_token(user: User = Depends(get_current_user)):
     return {"facebook_linked_accounts": len(fb_accounts), "results": results}
 
 
+class FacebookManualPageRequest(BaseModel):
+    page_id: str
+    profile_id: str = None
+
+
+@router.post("/connect/facebook/page")
+async def connect_facebook_page_manual(
+    data: FacebookManualPageRequest,
+    user: User = Depends(get_current_user),
+):
+    """
+    Manual Facebook page connection: the user provides their Page ID and we
+    fetch the page access token directly using their stored long-lived user token.
+    Used as a fallback when /me/accounts returns empty (Business-managed pages).
+    """
+    from app.services.token_service import decrypt_token
+
+    # Find stored Facebook user token (stored in refreshTokenEnc of any FB account,
+    # or in a temporary fb_pending_token custom field)
+    fb_pending_enc = getattr(user, "fb_pending_user_token_enc", None)
+
+    # Also check linked_accounts for any existing FB entry (reconnect case)
+    fb_acct = next((a for a in user.linked_accounts if a.platform == "facebook"), None)
+    user_token_enc = fb_pending_enc or (fb_acct.refresh_token_enc if fb_acct else None)
+
+    if not user_token_enc:
+        raise HTTPException(
+            status_code=400,
+            detail="No stored Facebook token. Please reconnect Facebook first, then use this endpoint.",
+        )
+
+    try:
+        user_token = decrypt_token(user_token_enc)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid stored Facebook token. Please reconnect Facebook.")
+
+    # Fetch the page directly by ID using the user token
+    import httpx
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        page_res = await client.get(
+            f"https://graph.facebook.com/v21.0/{data.page_id}",
+            params={
+                "fields": "id,name,access_token,picture,instagram_business_account{id,name,username,profile_picture_url}",
+                "access_token": user_token,
+            },
+        )
+    if page_res.status_code != 200:
+        err = page_res.json().get("error", {}).get("message", "Unknown error")
+        raise HTTPException(status_code=400, detail=f"Facebook page fetch failed: {err}")
+
+    page = page_res.json()
+    page_access_token = page.get("access_token")
+    if not page_access_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Facebook returned no page access token. Ensure you have Admin role on the page and granted pages_manage_posts.",
+        )
+
+    p_id = page["id"]
+    p_name = page["name"]
+    p_pic = page.get("picture", {}).get("data", {}).get("url")
+
+    from app.services.token_service import encrypt_token
+
+    if p_id not in {a.account_id for a in user.linked_accounts} and len(user.linked_accounts) >= user.max_profiles:
+        raise HTTPException(status_code=403, detail="Plan limit reached. Upgrade to add more profiles.")
+
+    linked_account = LinkedAccount(
+        platform="facebook",
+        accountId=p_id,
+        username=p_name,
+        displayName=p_name,
+        picture=p_pic,
+        accessTokenEnc=encrypt_token(page_access_token),
+        refreshTokenEnc=user_token_enc,
+        expiresAt=None,
+        scope="pages_show_list,pages_manage_posts,pages_read_engagement",
+        rawProfile=page,
+        profileId=data.profile_id,
+    )
+
+    user.linked_accounts = [a for a in user.linked_accounts if not (a.platform == "facebook" and a.account_id == p_id)]
+    user.linked_accounts.append(linked_account)
+    await user.save()
+
+    return {
+        "success": True,
+        "page_id": p_id,
+        "page_name": p_name,
+        "message": f"Successfully connected Facebook Page: {p_name}",
+    }
+
+
 @router.get("/google")
 async def google_login():
     return RedirectResponse(build_google_login_url())
@@ -520,16 +613,68 @@ async def oauth_callback(
             print(f"DEBUG: Number of pages: {len(pages) if pages else 0}")
             
             if not pages:
-                # More detailed error message
-                perm_list = ", ".join(granted_perms) if granted_perms else "None"
-                error_msg = (
-                    f"No Facebook Pages found. "
-                    f"Please ensure: (1) You manage at least one Facebook Page, "
-                    f"(2) You granted all permissions (including 'business_management' if using a Business Account) during authorization. "
-                    f"Granted permissions: {perm_list}. "
-                    f"If you are using a Business Account, ensure this App is added to your Business Manager."
+                # All automatic page-fetch methods failed (common for Business-managed pages
+                # in Development Mode). Store the long-lived user token on the user record so
+                # the manual /auth/connect/facebook/page endpoint can use it, then redirect
+                # the frontend to a "needs_page_id" flow instead of showing a hard error.
+                logger.warning(
+                    "No Facebook pages found via /me/accounts or Business API. "
+                    "Falling back to manual page ID flow."
                 )
-                return RedirectResponse(f"{frontend_url}/auth/callback?error={error_msg}")
+                # Find or create the user record so we have somewhere to store the token
+                needs_new_user = False
+                fallback_user = await User.get(user_id_from_state) if user_id_from_state else None
+                if not fallback_user:
+                    api_key_fallback = f"hs_{uuid.uuid4().hex}"
+                    fallback_user = User.build(
+                        apiKeyHash=hash_key(api_key_fallback),
+                        linkedAccounts=[],
+                    )
+                    needs_new_user = True
+                else:
+                    api_key_fallback = None
+
+                # Store the long-lived user token as a placeholder FB linked account
+                # (with no page token yet — the manual endpoint will replace it)
+                placeholder = LinkedAccount(
+                    platform="facebook",
+                    accountId="pending",
+                    username="Pending Page Connection",
+                    displayName="Pending Page Connection",
+                    accessTokenEnc=encrypt_token(user_access_token),
+                    refreshTokenEnc=encrypt_token(user_access_token),
+                    expiresAt=None,
+                    scope=",".join(sorted(requested_scopes)),
+                    profileId=profile_id_from_state,
+                )
+                # Remove any existing placeholder
+                fallback_user.linked_accounts = [
+                    a for a in fallback_user.linked_accounts
+                    if not (a.platform == "facebook" and a.account_id == "pending")
+                ]
+                fallback_user.linked_accounts.append(placeholder)
+
+                if needs_new_user:
+                    await fallback_user.insert()
+                else:
+                    await fallback_user.save()
+
+                if oauth_state_for_cleanup:
+                    await oauth_state_for_cleanup.delete()
+
+                jwt_token = create_access_token(data={"sub": str(fallback_user.id)})
+                redirect_params = {
+                    "platform": "facebook",
+                    "needs_page_id": "true",
+                    "token": jwt_token,
+                }
+                if api_key_fallback:
+                    redirect_params["apiKey"] = api_key_fallback
+                if profile_id_from_state:
+                    redirect_params["profileId"] = profile_id_from_state
+                return RedirectResponse(url=f"{frontend_url}/auth/callback?{urlencode(redirect_params)}")
+
+
 
 
             # 3. Find/Create User (Logic: If user logged in, use them. Else find by first page ID match or create)
