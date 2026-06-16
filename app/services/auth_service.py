@@ -408,6 +408,7 @@ async def get_platform_connect_payload(
             "pages_show_list",
             "pages_read_engagement",
             "pages_manage_posts",
+            "business_management",
         ]
         final_scopes = _split_scope_env(os.getenv("FACEBOOK_SCOPES"), default_scopes)
         await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, final_scopes)

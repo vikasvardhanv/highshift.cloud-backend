@@ -185,25 +185,27 @@ async def get_page_access_token(user_access_token: str, page_id: str) -> str | N
 async def get_accounts(access_token: str):
     """
     Fetch Facebook Pages and linked Instagram Business Accounts.
+    Tries /me/accounts first, then falls back to the Business Manager API
+    for pages managed via Meta Business Suite.
     """
     async with httpx.AsyncClient() as client:
         try:
             res = await client.get(
                 "https://graph.facebook.com/v21.0/me/accounts",
                 params={
-                    "fields": "id,name,access_token,picture,instagram_business_account{id,name,username,profile_picture_url},tasks", 
+                    "fields": "id,name,access_token,picture,instagram_business_account{id,name,username,profile_picture_url},tasks",
                     "limit": "100",
                     "access_token": access_token
                 }
             )
-            
+
             logger.info(f"Facebook API Response Status: {res.status_code}")
             if res.status_code != 200:
                 raise Exception(f"Facebook get_accounts failed: {_extract_fb_error(res)}")
             data = res.json()
-            
+
             all_pages = data.get("data", [])
-            
+
             # Pagination
             next_page = data.get("paging", {}).get("next")
             while next_page:
@@ -220,8 +222,15 @@ async def get_accounts(access_token: str):
                     logger.error(f"Error fetching next page: {e}")
                     break
 
-            logger.info(f"Facebook Pages Found: {len(all_pages)} pages")
-            
+            logger.info(f"Facebook Pages Found via /me/accounts: {len(all_pages)} pages")
+
+            # --- Business API fallback ---
+            # /me/accounts returns empty for pages managed through Meta Business Suite.
+            # When that happens, try fetching pages via the Business Manager API.
+            if not all_pages:
+                logger.info("No pages via /me/accounts — trying Business API fallback")
+                all_pages = await _get_accounts_via_business(client, access_token)
+
             return all_pages
         except httpx.HTTPStatusError as e:
             logger.error(f"Facebook API Error: {e.response.status_code} - {e.response.text}")
@@ -229,6 +238,45 @@ async def get_accounts(access_token: str):
         except Exception as e:
             logger.error(f"Unexpected error in get_accounts: {str(e)}")
             raise
+
+
+async def _get_accounts_via_business(client: httpx.AsyncClient, access_token: str) -> list:
+    """
+    Fallback: fetch pages through the Business Manager API.
+    Works for pages managed via Meta Business Suite where /me/accounts returns empty.
+    Requires the business_management permission.
+    """
+    page_fields = "id,name,access_token,picture,instagram_business_account{id,name,username,profile_picture_url},tasks"
+    try:
+        biz_res = await client.get(
+            "https://graph.facebook.com/v21.0/me/businesses",
+            params={
+                "fields": f"id,name,owned_pages{{{page_fields}}},client_pages{{{page_fields}}}",
+                "access_token": access_token,
+                "limit": "50",
+            }
+        )
+        if biz_res.status_code != 200:
+            logger.warning(f"Business API fallback failed: {_extract_fb_error(biz_res)}")
+            return []
+
+        biz_data = biz_res.json().get("data", [])
+        logger.info(f"Business API returned {len(biz_data)} businesses")
+
+        pages = []
+        seen_ids: set = set()
+        for biz in biz_data:
+            for key in ("owned_pages", "client_pages"):
+                for page in (biz.get(key) or {}).get("data", []):
+                    if page.get("id") not in seen_ids:
+                        seen_ids.add(page["id"])
+                        pages.append(page)
+
+        logger.info(f"Business API fallback found {len(pages)} pages")
+        return pages
+    except Exception as e:
+        logger.error(f"Business API fallback error: {e}")
+        return []
 
 
 async def get_permissions(access_token: str):
