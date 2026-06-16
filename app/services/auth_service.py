@@ -411,6 +411,11 @@ async def get_platform_connect_payload(
             "business_management",
         ]
         final_scopes = _split_scope_env(os.getenv("FACEBOOK_SCOPES"), default_scopes)
+        # Always ensure business_management is present — the Business Manager API
+        # fallback in facebook.get_accounts() requires it. Guards against env var
+        # overrides accidentally dropping it.
+        if "business_management" not in final_scopes:
+            final_scopes.append("business_management")
         await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, final_scopes)
         return {
             "authUrl": await facebook.get_auth_url(
