@@ -75,6 +75,47 @@ async def login(user_data: UserLogin):
 async def get_current_user_info(user: User = Depends(get_current_user)):
     return build_user_me_response(user)
 
+
+@router.get("/debug/facebook")
+async def debug_facebook_token(user: User = Depends(get_current_user)):
+    """
+    Diagnostic endpoint: decrypts the stored Facebook user-token and calls
+    /me/accounts so you can see exactly what Facebook returns.
+    Only available to authenticated users (their own account).
+    """
+    from app.services.token_service import decrypt_token
+
+    fb_accounts = [a for a in user.linked_accounts if a.platform == "facebook"]
+    if not fb_accounts:
+        return {"error": "No Facebook account linked", "accounts": []}
+
+    results = []
+    for acct in fb_accounts:
+        # refreshTokenEnc holds the long-lived user token; accessTokenEnc holds the page token
+        user_token_enc = acct.refresh_token_enc or acct.access_token_enc
+        if not user_token_enc:
+            results.append({"account_id": acct.account_id, "error": "No token stored"})
+            continue
+
+        try:
+            user_token = decrypt_token(user_token_enc)
+            pages = await facebook.get_accounts(user_token)
+            perms = await facebook.get_permissions(user_token)
+            granted = [p["permission"] for p in perms if p.get("status") == "granted"]
+            results.append({
+                "account_id": acct.account_id,
+                "display_name": acct.display_name,
+                "pages_found": len(pages),
+                "page_ids": [p["id"] for p in pages],
+                "page_names": [p["name"] for p in pages],
+                "granted_permissions": granted,
+            })
+        except Exception as e:
+            results.append({"account_id": acct.account_id, "error": str(e)})
+
+    return {"facebook_linked_accounts": len(fb_accounts), "results": results}
+
+
 @router.get("/google")
 async def google_login():
     return RedirectResponse(build_google_login_url())
@@ -540,6 +581,7 @@ async def oauth_callback(
                     displayName=p_name,
                     picture=p_pic,
                     accessTokenEnc=encrypt_token(p_token), # Store PAGE Token
+                    refreshTokenEnc=encrypt_token(user_access_token), # Long-lived user token for page token refresh
                     expiresAt=None, # Page tokens last forever? Or until user password change.
                     scope=",".join(sorted(requested_scopes)),
                     rawProfile=page,

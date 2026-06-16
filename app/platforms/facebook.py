@@ -18,14 +18,17 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
         "redirect_uri": redirect_uri,
         "state": state,
         "response_type": "code",
-        "scope": ",".join(scopes)
+        "scope": ",".join(scopes),
+        # Always re-show the page-selection dialog so the user can pick pages.
+        # Without this, Facebook skips the page selector if previously authorized.
+        "auth_type": "rerequest",
     }
-    return f"https://www.facebook.com/v19.0/dialog/oauth?{urlencode(params)}"
+    return f"https://www.facebook.com/v21.0/dialog/oauth?{urlencode(params)}"
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v19.0/oauth/access_token",
+            "https://graph.facebook.com/v21.0/oauth/access_token",
             params={
                 "client_id": client_id,
                 "client_secret": client_secret,
@@ -41,7 +44,7 @@ async def exchange_long_lived_token(client_id: str, client_secret: str, user_acc
     """Exchange a short-lived user access token for a long-lived user access token."""
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v19.0/oauth/access_token",
+            "https://graph.facebook.com/v21.0/oauth/access_token",
             params={
                 "grant_type": "fb_exchange_token",
                 "client_id": client_id,
@@ -63,7 +66,7 @@ async def post_to_page(access_token: str, page_id: str, message: str, link: str 
             params["link"] = link
             
         res = await client.post(
-            f"https://graph.facebook.com/v19.0/{page_id}/feed",
+            f"https://graph.facebook.com/v21.0/{page_id}/feed",
             params=params
         )
         if res.status_code != 200:
@@ -90,7 +93,7 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
                 params["url"] = image_urls[0]
             
             res = await client.post(
-                f"https://graph.facebook.com/v19.0/{page_id}/photos", 
+                f"https://graph.facebook.com/v21.0/{page_id}/photos", 
                 params=params, 
                 files=files
             )
@@ -109,7 +112,7 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
                     params["url"] = url
                     
                 upload_res = await client.post(
-                    f"https://graph.facebook.com/v19.0/{page_id}/photos", 
+                    f"https://graph.facebook.com/v21.0/{page_id}/photos", 
                     params=params if not files else {"access_token": access_token, "published": "false"}, 
                     files=files
                 )
@@ -125,7 +128,7 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
                 "attached_media": json.dumps(attached_media),
                 "access_token": access_token
             }
-            res = await client.post(f"https://graph.facebook.com/v19.0/{page_id}/feed", params=params)
+            res = await client.post(f"https://graph.facebook.com/v21.0/{page_id}/feed", params=params)
             
         if res.status_code != 200:
             raise Exception(f"Facebook photo post failed: {_extract_fb_error(res)}")
@@ -149,7 +152,7 @@ async def post_video(access_token: str, page_id: str, message: str, video_url: s
         
         # Facebook Video API: https://graph.facebook.com/{page-id}/videos
         res = await client.post(
-            f"https://graph.facebook.com/v19.0/{page_id}/videos",
+            f"https://graph.facebook.com/v21.0/{page_id}/videos",
             params=params if not files else {"access_token": access_token, "description": message},
             files=files
         )
@@ -160,7 +163,7 @@ async def post_video(access_token: str, page_id: str, message: str, video_url: s
 async def get_me(access_token: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v19.0/me",
+            "https://graph.facebook.com/v21.0/me",
             params={
                 "fields": "id,name,email",
                 "access_token": access_token
@@ -170,6 +173,15 @@ async def get_me(access_token: str):
             raise Exception(f"Facebook get_me failed: {_extract_fb_error(res)}")
         return res.json()
 
+async def get_page_access_token(user_access_token: str, page_id: str) -> str | None:
+    """Fetch a fresh Page access token using a long-lived user access token."""
+    pages = await get_accounts(user_access_token)
+    for page in pages:
+        if str(page.get("id")) == str(page_id):
+            return page.get("access_token")
+    return None
+
+
 async def get_accounts(access_token: str):
     """
     Fetch Facebook Pages and linked Instagram Business Accounts.
@@ -177,7 +189,7 @@ async def get_accounts(access_token: str):
     async with httpx.AsyncClient() as client:
         try:
             res = await client.get(
-                "https://graph.facebook.com/v19.0/me/accounts",
+                "https://graph.facebook.com/v21.0/me/accounts",
                 params={
                     "fields": "id,name,access_token,picture,instagram_business_account{id,name,username,profile_picture_url},tasks", 
                     "limit": "100",
@@ -225,7 +237,7 @@ async def get_permissions(access_token: str):
     """
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v19.0/me/permissions",
+            "https://graph.facebook.com/v21.0/me/permissions",
             params={"access_token": access_token}
         )
         if res.status_code != 200:
