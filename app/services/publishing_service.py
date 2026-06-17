@@ -142,12 +142,39 @@ def _raw_profile(account) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def _friendly_facebook_error(error: str) -> str:
+    lowered = error.lower()
+    if (
+        "(#200)" in error
+        or "pages_manage_posts" in lowered
+        or "pages_read_engagement" in lowered
+        or "publish_to_groups" in lowered
+    ):
+        return (
+            f"{error} Reconnect Facebook in Profiles, select your Page, and grant all page permissions."
+        )
+    return error
+
+
+def _friendly_twitter_error(error: str) -> str:
+    lowered = error.lower()
+    if "does not have any credits" in lowered:
+        return (
+            "X API credits are depleted for this app. "
+            "An administrator must add credits in the X Developer Console, then retry the post."
+        )
+    if any(term in lowered for term in ("unauthorized", "invalid token", "token refresh")):
+        return "Twitter token refresh failed. Please reconnect Twitter and schedule again."
+    return error
+
+
 def _facebook_publish_preflight_error(account) -> Optional[str]:
     scopes = _scope_set(getattr(account, "scope", None))
+    required_scopes = ("pages_manage_posts", "pages_read_engagement")
     missing_scopes = [
         scope
-        for scope in ("pages_manage_posts", "pages_read_engagement")
-        if scopes and scope not in scopes
+        for scope in required_scopes
+        if not scopes or scope not in scopes
     ]
     if missing_scopes:
         return (
@@ -155,7 +182,14 @@ def _facebook_publish_preflight_error(account) -> Optional[str]:
             f"({', '.join(missing_scopes)}). Reconnect Facebook and grant Page publishing access."
         )
 
-    tasks = _raw_profile(account).get("tasks")
+    profile = _raw_profile(account)
+    if "tasks" not in profile and not profile.get("access_token"):
+        return (
+            f"{_account_label(account)} is a personal Facebook profile, not a Page. "
+            "Reconnect Facebook and select a Page to publish."
+        )
+
+    tasks = profile.get("tasks")
     if isinstance(tasks, list):
         normalized_tasks = {str(task).upper() for task in tasks}
         if normalized_tasks and not ({"CREATE_CONTENT", "MANAGE"} & normalized_tasks):
@@ -165,6 +199,35 @@ def _facebook_publish_preflight_error(account) -> Optional[str]:
             )
 
     return None
+
+
+async def _refresh_facebook_page_token(user: User, account, page_id: str) -> Optional[str]:
+    user_token_enc = getattr(account, "refresh_token_enc", None)
+    if not user_token_enc:
+        return None
+
+    try:
+        user_token = decrypt_token(user_token_enc)
+        fresh_page_token = await facebook.get_page_access_token(user_token, page_id)
+        if not fresh_page_token:
+            logger.warning("Facebook page token refresh returned no token for page %s", page_id)
+            return None
+
+        account.access_token_enc = encrypt_token(fresh_page_token)
+        account.updated_at = datetime.datetime.utcnow()
+        await user.save()
+        logger.info("Refreshed Facebook page token for page %s", page_id)
+        return fresh_page_token
+    except Exception as e:
+        logger.warning("Facebook page token refresh failed for page %s: %s", page_id, e)
+        return None
+
+
+def _twitter_token_needs_refresh(expires_at) -> bool:
+    expires_at = _as_naive_utc_datetime(expires_at)
+    if not expires_at:
+        return False
+    return expires_at <= datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
 
 async def publish_content(
     user: User, 
@@ -328,8 +391,6 @@ async def publish_content(
             
             # --- TWITTER ---
             if platform == "twitter":
-                refresh_failed = False
-
                 async def refresh_twitter_token():
                     if not account.refresh_token_enc:
                         raise Exception("Twitter authorization expired. Reconnect Twitter and schedule again.")
@@ -349,16 +410,14 @@ async def publish_content(
 
                 expires_at = _as_naive_utc_datetime(getattr(account, "expires_at", None))
                 account.expires_at = expires_at
-                if expires_at and expires_at < datetime.datetime.utcnow():
+                if _twitter_token_needs_refresh(expires_at):
                     if account.refresh_token_enc:
                         try:
                             token = await refresh_twitter_token()
                         except Exception as refresh_error:
-                            refresh_failed = True
-                            logger.error(f"Twitter token refresh failed: {refresh_error}")
-                            logger.warning("Twitter refresh failed; attempting publish once with existing token")
+                            logger.error("Twitter proactive token refresh failed: %s", refresh_error)
                     else:
-                        logger.warning("Twitter token is expired and no refresh token is stored; attempting publish once with existing token")
+                        logger.warning("Twitter token is near expiry and no refresh token is stored")
 
                 media_ids = []
                 # Use processed paths (includes temp files from base64 conversion)
@@ -377,9 +436,23 @@ async def publish_content(
                 try:
                     res = await twitter.post_tweet(token, content, media_ids=media_ids)
                 except Exception as post_error:
-                    if refresh_failed or "unauthorized" in str(post_error).lower() or "invalid token" in str(post_error).lower():
-                        raise Exception("Twitter token refresh failed. Please reconnect Twitter and schedule again.") from post_error
-                    if not account.refresh_token_enc:
+                    post_error_text = str(post_error).lower()
+                    auth_error = any(
+                        term in post_error_text
+                        for term in ("unauthorized", "invalid token", "401")
+                    )
+                    if auth_error and account.refresh_token_enc:
+                        logger.warning("Twitter post auth failed; refreshing token and retrying once: %s", post_error)
+                        try:
+                            token = await refresh_twitter_token()
+                            res = await twitter.post_tweet(token, content, media_ids=media_ids)
+                        except Exception as retry_error:
+                            raise Exception(
+                                _friendly_twitter_error(str(retry_error))
+                            ) from retry_error
+                    elif auth_error:
+                        raise Exception(_friendly_twitter_error(str(post_error))) from post_error
+                    elif not account.refresh_token_enc:
                         raise
                     logger.warning("Twitter post failed; refreshing token and retrying once: %s", post_error)
                     token = await refresh_twitter_token()
@@ -412,23 +485,54 @@ async def publish_content(
 
             # --- FACEBOOK ---
             elif platform == "facebook":
-                if is_video:
-                    res = await facebook.post_video(
-                        token, account_id, content, 
-                        media_items[0]["url"], 
-                        local_path=media_items[0]["path"]
-                    )
-                elif media_items:
-                    res = await facebook.post_photo(
-                        token, account_id, content, 
-                        [m["url"] for m in media_items],
-                        local_paths=[m["path"] for m in media_items]
-                    )
-                elif link_in_text:
-                    res = await facebook.post_to_page(token, account_id, content, link=link_in_text)
-                else:
-                    res = await facebook.post_to_page(token, account_id, content)
-                
+                fresh_token = await _refresh_facebook_page_token(user, account, account_id)
+                if fresh_token:
+                    token = fresh_token
+
+                try:
+                    if is_video:
+                        res = await facebook.post_video(
+                            token, account_id, content,
+                            media_items[0]["url"],
+                            local_path=media_items[0]["path"]
+                        )
+                    elif media_items:
+                        res = await facebook.post_photo(
+                            token, account_id, content,
+                            [m["url"] for m in media_items],
+                            local_paths=[m["path"] for m in media_items]
+                        )
+                    elif link_in_text:
+                        res = await facebook.post_to_page(token, account_id, content, link=link_in_text)
+                    else:
+                        res = await facebook.post_to_page(token, account_id, content)
+                except Exception as post_error:
+                    post_error_text = str(post_error)
+                    if "(#200)" in post_error_text or "pages_manage_posts" in post_error_text.lower():
+                        retry_token = await _refresh_facebook_page_token(user, account, account_id)
+                        if retry_token and retry_token != token:
+                            token = retry_token
+                            if is_video:
+                                res = await facebook.post_video(
+                                    token, account_id, content,
+                                    media_items[0]["url"],
+                                    local_path=media_items[0]["path"]
+                                )
+                            elif media_items:
+                                res = await facebook.post_photo(
+                                    token, account_id, content,
+                                    [m["url"] for m in media_items],
+                                    local_paths=[m["path"] for m in media_items]
+                                )
+                            elif link_in_text:
+                                res = await facebook.post_to_page(token, account_id, content, link=link_in_text)
+                            else:
+                                res = await facebook.post_to_page(token, account_id, content)
+                        else:
+                            raise Exception(_friendly_facebook_error(post_error_text)) from post_error
+                    else:
+                        raise
+
                 results.append({"platform": "facebook", "status": "success", "id": res.get("id")})
                 await insert_activity(str(user.id), "Posted to Facebook", platform="Facebook", type_="success")
 

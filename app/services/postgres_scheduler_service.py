@@ -1,10 +1,13 @@
 import logging
 from typing import Any, Dict, Optional
 
+import httpx
+
 from app.db.postgres import (
     claim_next_due_scheduled_post,
     claim_scheduled_post_by_id,
     fetch_user_by_id,
+    get_webhooks_for_organization,
     insert_activity,
     mark_scheduled_post_failed,
     mark_scheduled_post_published,
@@ -59,6 +62,10 @@ async def _publish_claimed_post(post: Dict[str, Any]) -> Dict[str, Any]:
             platform="System",
             meta={"postId": str(post["id"])},
         )
+        
+        # Send webhooks
+        await _send_webhooks(str(post["id"]), str(user.id), post.get("organization_id"))
+        
         return {"status": "published", "result": result}
     except Exception as e:
         logger.error("Scheduled post %s failed: %s", post["id"], e, exc_info=True)
@@ -104,4 +111,36 @@ async def process_due_posts(limit: int = 50) -> Dict[str, int]:
             failed += 1
 
     return {"processed": processed, "published": published, "failed": failed}
+
+
+async def _send_webhooks(post_id: str, user_id: str, organization_id: Optional[str]):
+    """Send webhooks for published posts."""
+    if not organization_id:
+        return
+    
+    try:
+        webhooks = await get_webhooks_for_organization(organization_id)
+        if not webhooks:
+            return
+        
+        # Get the post data to send
+        from app.db.postgres import get_scheduled_post_by_id
+        post = await get_scheduled_post_by_id(post_id)
+        if not post:
+            return
+        
+        for webhook in webhooks:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        webhook.get("url"),
+                        json=post,
+                        headers={"Content-Type": "application/json"},
+                        timeout=10.0
+                    )
+                logger.info(f"Webhook sent to {webhook.get('url')} for post {post_id}")
+            except Exception as e:
+                logger.error(f"Failed to send webhook to {webhook.get('url')}: {e}")
+    except Exception as e:
+        logger.error(f"Error sending webhooks for post {post_id}: {e}")
 

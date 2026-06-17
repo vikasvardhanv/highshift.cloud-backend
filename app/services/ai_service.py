@@ -5,6 +5,7 @@ from google import genai
 from google.genai import types
 from openai import AsyncOpenAI
 from app.db.postgres import fetch_user_by_id
+from app.services.memory_service import memory_service
 from app.utils.logger import logger
 
 # Configuration
@@ -146,8 +147,29 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
     Generate generic content based on detected intent.
     If intent is 'image', generates an image.
     If intent is 'text', generates text.
+    Enhanced with memory system for context awareness.
     """
     try:
+        # Get conversation memory for context
+        memory = await memory_service.get_conversation_memory(user_id)
+        working_memory = await memory_service.get_working_memory(user_id)
+        
+        # Store current topic in working memory
+        await memory_service.update_working_memory(user_id, {
+            **working_memory,
+            "last_topic": topic,
+            "last_platform": platform,
+            "last_request": datetime.utcnow().isoformat()
+        })
+        
+        # Add user message to memory
+        await memory_service.add_message(
+            user_id,
+            "user",
+            topic,
+            metadata={"platform": platform, "tone": tone}
+        )
+        
         # 1. Detect Intent
         intent = await detect_intent(topic)
         
@@ -255,6 +277,14 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
                 "content": "No AI Provider configured (Missing GEMINI_API_KEY or GROK_API_KEY).",
                 "model": "none"
             }
+
+        # Add AI response to memory
+        await memory_service.add_message(
+            user_id,
+            "assistant",
+            content,
+            metadata={"platform": platform, "model": model_name}
+        )
 
         return {
             "type": "text",

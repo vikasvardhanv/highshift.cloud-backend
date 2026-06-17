@@ -1094,6 +1094,50 @@ async def mark_scheduled_post_failed(post_id: str, error: str) -> bool:
     return res.endswith("1")
 
 
+async def find_missed_scheduled_posts(hours_back: int = 3) -> List[Dict[str, Any]]:
+    """
+    Find posts that were scheduled more than X hours ago but are still pending.
+    These are posts that may have been missed by the scheduler.
+    """
+    columns = await _scheduled_post_columns(await get_pool())
+    if not columns:
+        return []
+    
+    scheduled_col = "scheduled_for" if "scheduled_for" in columns else "scheduled_time"
+    
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            select * from scheduled_posts
+            where status='pending'
+              and {scheduled_col} < now() - interval '{hours_back} hours'
+            order by {scheduled_col} asc
+            """
+        )
+        return [_normalize_scheduled_post(row) for row in rows]
+
+
+async def get_webhooks_for_organization(organization_id: str) -> List[Dict[str, Any]]:
+    """Get all webhooks for an organization."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        columns = await _get_columns("webhooks")
+        if not columns:
+            return []
+        
+        rows = await conn.fetch(
+            f"""
+            select * from webhooks
+            where organization_id={_id_param_expr(columns, 1)}
+            """
+            if "organization_id" in columns else
+            "select * from webhooks where 1=0",
+            organization_id if "organization_id" in columns else None
+        )
+        return [dict(row) for row in rows]
+
+
 async def insert_media_asset(
     user_id: str,
     filename: str,
