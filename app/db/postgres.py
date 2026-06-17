@@ -681,6 +681,19 @@ async def _scheduled_post_columns(conn) -> Dict[str, str]:
     return {row["column_name"]: row["data_type"] for row in rows}
 
 
+async def _get_columns(table_name: str) -> Dict[str, str]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            select column_name, data_type
+            from information_schema.columns
+            where table_schema='public' and table_name='{table_name}'
+            """
+        )
+        return {row["column_name"]: row["data_type"] for row in rows}
+
+
 def _normalize_scheduled_post(row: Optional[asyncpg.Record]) -> Optional[Dict[str, Any]]:
     data = _record_to_dict(row)
     if not data:
