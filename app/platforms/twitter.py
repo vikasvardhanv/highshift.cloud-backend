@@ -283,7 +283,7 @@ async def post_tweet(access_token: str, text: str, media_ids: list = None):
                 if errors:
                     error_detail = errors[0].get("message", str(errors))
                 error_msg = error_detail or str(error_data)
-            except:
+            except Exception:
                 error_msg = res.text
             logger.error(f"Twitter API error: {res.status_code} - {error_msg}")
             raise Exception(f"Twitter post failed: {error_msg}")

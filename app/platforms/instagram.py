@@ -35,9 +35,6 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
     If local_path is provided, it must be hosted publicly first.
     """
     import asyncio
-    import logging
-    logger = logging.getLogger("instagram")
-    
     async with httpx.AsyncClient(timeout=60.0) as client:
         # 1. Create container
         logger.info(f"Instagram: Creating container for image_url={image_url[:100]}...")

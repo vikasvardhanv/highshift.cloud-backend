@@ -45,10 +45,8 @@ async def create_record(access_token: str, did: str, text: str, embed: dict = No
     """
     Post a status update (feed item).
     """
-    import datetime
-    
     # We need strictly formatted ISO string "1985-04-12T23:20:50.52Z"
-    now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+    now_iso = datetime.utcnow().isoformat() + "Z"
     
     record = {
         "$type": "app.bsky.feed.post",

@@ -146,7 +146,6 @@ async def fetch_and_preview_rss(
             raise HTTPException(status_code=404, detail="Autopost config not found")
         
         feed_url = row["feed_url"]
-        post_template = row["post_template"]
     
     # Fetch and parse RSS
     try:
@@ -154,12 +153,8 @@ async def fetch_and_preview_rss(
             response = await client.get(feed_url)
             content = response.text
         
-        # Simple XML parsing for RSS
-        items = []
+        # Simple XML parsing for RSS (Stubbed until full implementation)
         import re
-        title_match = re.search(r'<title><!\[CDATA\[(.*?)\]\]></title>|<title>(.*?)</title>', content)
-        desc_match = re.search(r'<description><!\[CDATA\[(.*?)\]\]></description>|<description>(.*?)</description>', content)
-        link_match = re.search(r'<link>(.*?)</link>', content)
         
         # For now, return sample preview
         preview = {

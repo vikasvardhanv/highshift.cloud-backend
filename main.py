@@ -181,7 +181,6 @@ class ErrorMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             return response
         except Exception as e:
-            import logging
             logger = logging.getLogger("main")
             logger.error(f"Unhandled Exception: {e}", exc_info=True)
             

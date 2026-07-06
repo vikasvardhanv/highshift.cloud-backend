@@ -76,7 +76,7 @@ class SchedulePostTool(Tool):
             # Parse the scheduled time
             try:
                 scheduled_dt = datetime.fromisoformat(scheduled_for.replace("Z", "+00:00"))
-            except:
+            except Exception:
                 return {
                     "success": False,
                     "error": "Invalid datetime format. Use ISO format like 2024-06-10T15:30:00Z"
@@ -149,7 +149,7 @@ class ListIntegrationsTool(Tool):
             
             integrations = []
             for acc in linked_accounts:
-                integrations({
+                integrations.append({
                     "platform": acc.get("platform"),
                     "account_id": acc.get("account_id"),
                     "username": acc.get("username", "Unknown")

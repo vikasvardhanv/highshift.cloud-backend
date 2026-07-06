@@ -9,7 +9,7 @@ def _extract_fb_error(res):
         data = res.json()
         error = data.get("error", {})
         return error.get("message", str(data))
-    except:
+    except Exception:
         return f"HTTP {res.status_code}"
 
 async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: list):
@@ -102,7 +102,6 @@ async def post_photo(access_token: str, page_id: str, message: str, image_urls: 
             media_fbid_list = []
             for i, url in enumerate(image_urls):
                 p = paths[i] if i < len(paths) else None
-                data = {"published": "false", "access_token": access_token}
                 files = None
                 params = {}
                 
@@ -140,7 +139,6 @@ async def post_video(access_token: str, page_id: str, message: str, video_url: s
     Supports both public URL (file_url) and local file (source).
     """
     async with httpx.AsyncClient() as client:
-        data = {"description": message, "access_token": access_token}
         files = None
         params = {}
         
