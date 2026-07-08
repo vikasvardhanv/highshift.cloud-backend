@@ -186,7 +186,7 @@ class ErrorMiddleware(BaseHTTPMiddleware):
             logger.error(f"Unhandled Exception: {e}", exc_info=True)
             
             # Create error response
-            content = {"detail": "Internal Server Error", "error": str(e)}
+            content = {"detail": f"Internal Server Error: {str(e)}", "error": str(e)}
             response = JSONResponse(status_code=500, content=content)
             
             # MANUALLY ADD CORS HEADERS for errors
