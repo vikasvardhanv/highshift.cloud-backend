@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -236,7 +237,6 @@ app.include_router(webhook_routes.router)
 app.include_router(autopost_routes.router)
 
 from fastapi.staticfiles import StaticFiles
-import logging
 
 # Safe static file mounting for Vercel/Serverless (Read-only filesystem)
 try:
