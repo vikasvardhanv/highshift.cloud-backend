@@ -12,11 +12,13 @@ from app.utils.logger import logger
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROK_API_KEY = os.getenv("GROK_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
 GEMINI_INTENT_MODEL = os.getenv("GEMINI_INTENT_MODEL", GEMINI_TEXT_MODEL)
 GROK_TEXT_MODEL = os.getenv("GROK_TEXT_MODEL", "grok-2-latest")
+OPENROUTER_TEXT_MODEL = os.getenv("OPENROUTER_TEXT_MODEL", "openai/gpt-4o-mini")
 
-PROVIDER = "gemini" if GEMINI_API_KEY else ("grok" if GROK_API_KEY else "none")
+PROVIDER = "openrouter" if OPENROUTER_API_KEY else ("gemini" if GEMINI_API_KEY else ("grok" if GROK_API_KEY else "none"))
 N8N_INSTANT_WEBHOOK_URL = os.getenv("N8N_INSTANT_WEBHOOK_URL", "https://wfig.app.n8n.cloud/form/1e3df4e4-a0fd-453e-9942-63ee710aeded")
 
 # Initialize Clients
@@ -27,6 +29,13 @@ if GROK_API_KEY:
     grok_client = AsyncOpenAI(
         api_key=GROK_API_KEY,
         base_url="https://api.x.ai/v1",
+    )
+
+openrouter_client = None
+if OPENROUTER_API_KEY:
+    openrouter_client = AsyncOpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
     )
 
 logger.info(f"AI Service initialized with provider: {PROVIDER}")
@@ -101,6 +110,20 @@ async def detect_intent(prompt: str) -> str:
         elif PROVIDER == "grok" and grok_client:
             response = await grok_client.chat.completions.create(
                 model=GROK_TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.1
+            )
+            content = response.choices[0].message.content
+            data = json.loads(content)
+            return data.get("intent", "text")
+            
+        elif PROVIDER == "openrouter" and openrouter_client:
+            response = await openrouter_client.chat.completions.create(
+                model=OPENROUTER_TEXT_MODEL,
                 messages=[
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": prompt}
@@ -272,10 +295,23 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
             content = response.choices[0].message.content.strip()
             usage = response.usage.total_tokens if response.usage else 0
 
+        elif PROVIDER == "openrouter" and openrouter_client:
+            model_name = OPENROUTER_TEXT_MODEL
+            response = await openrouter_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7
+            )
+            content = response.choices[0].message.content.strip()
+            usage = response.usage.total_tokens if response.usage else 0
+
         else:
             return {
                 "type": "error",
-                "content": "No AI Provider configured (Missing GEMINI_API_KEY or GROK_API_KEY).",
+                "content": "No AI Provider configured (Missing GEMINI_API_KEY, GROK_API_KEY, or OPENROUTER_API_KEY).",
                 "model": "none"
             }
 
