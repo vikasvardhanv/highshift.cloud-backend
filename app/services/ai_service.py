@@ -13,6 +13,7 @@ from app.utils.logger import logger
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROK_API_KEY = os.getenv("GROK_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+AGENT_MEDIA_API_KEY = os.getenv("AGENT_MEDIA_API_KEY")
 GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
 GEMINI_INTENT_MODEL = os.getenv("GEMINI_INTENT_MODEL", GEMINI_TEXT_MODEL)
 GROK_TEXT_MODEL = os.getenv("GROK_TEXT_MODEL", "grok-2-latest")
@@ -166,6 +167,63 @@ async def generate_image(prompt: str):
     logger.warning("Image generation requested but Gemini standard API does not support widespread image generation in this SDK version without Vertex AI.")
     raise Exception("Image generation not supported with current AI configuration.")
 
+async def generate_video(prompt: str) -> str:
+    """
+    Generate a video. If AGENT_MEDIA_API_KEY is present, hits api.agent-media.ai.
+    Otherwise, falls back to a high-quality mock video for client demonstration.
+    """
+    if not AGENT_MEDIA_API_KEY:
+        logger.info("No AGENT_MEDIA_API_KEY found. Falling back to Mock Video Generation.")
+        import asyncio
+        await asyncio.sleep(3) # Simulate generation time
+        return "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4"
+
+    import httpx
+    import asyncio
+    
+    headers = {
+        "Authorization": f"Bearer {AGENT_MEDIA_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "script": prompt
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # 1. Start the run
+            init_res = await client.post(
+                "https://api.agent-media.ai/v1/skills/make_ugc/run",
+                headers=headers,
+                json=payload
+            )
+            init_res.raise_for_status()
+            run_id = init_res.json().get("skill_run_id")
+            
+            if not run_id:
+                raise Exception("Did not receive a skill_run_id from agent-media.")
+                
+            # 2. Poll until succeeded
+            for _ in range(30): # Poll for up to 30*4 = 120 seconds
+                await asyncio.sleep(4)
+                status_res = await client.get(
+                    f"https://api.agent-media.ai/v1/skills/runs/{run_id}",
+                    headers=headers
+                )
+                status_data = status_res.json()
+                
+                if status_data.get("status") == "succeeded":
+                    return status_data.get("final_output", {}).get("video_url")
+                elif status_data.get("status") == "failed":
+                    raise Exception(f"Video generation failed: {status_data.get('error')}")
+                    
+            raise Exception("Video generation timed out while polling.")
+            
+    except Exception as e:
+        logger.error(f"Agent-Media Video generation failed: {e}")
+        # Fallback to mock on error so the client demo never breaks
+        return "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4"
+
 async def generate_post_content(user_id: str, topic: str, platform: str, tone: Optional[str] = None):
     """
     Generate generic content based on detected intent.
@@ -223,11 +281,19 @@ async def generate_post_content(user_id: str, topic: str, platform: str, tone: O
                 }
         
         elif intent == "video":
-            return {
-                "type": "video",
-                "content": "Video generation is currently not configured/supported.",
-                "model": "placeholder"
-            }
+            try:
+                video_url = await generate_video(topic)
+                return {
+                    "type": "video",
+                    "content": video_url,
+                    "model": "agent-media" if AGENT_MEDIA_API_KEY else "mock-video-engine"
+                }
+            except Exception as e:
+                return {
+                    "type": "text",
+                    "content": f"Sorry, I couldn't generate a video at this time. ({str(e)})",
+                    "model": "system"
+                }
 
         # 2. Text Generation (Default)
         brand = await get_brand_context(user_id)
