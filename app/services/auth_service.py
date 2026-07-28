@@ -239,12 +239,9 @@ def build_user_me_response(user: User) -> dict:
     initials = "U"
     if user.email:
         email_prefix = user.email.split("@")[0]
-        name_parts = email_prefix.replace(".", " ").replace("_", " ").split()
-        name = " ".join(part.capitalize() for part in name_parts)
-        if len(name_parts) >= 2:
-            initials = (name_parts[0][0] + name_parts[-1][0]).upper()
-        elif len(name_parts) == 1:
-            initials = name_parts[0][:2].upper()
+        name = email_prefix
+        if len(name) > 0:
+            initials = name[:2].upper()
 
     return {
         "id": str(user.id),
