@@ -291,3 +291,54 @@ async def get_permissions(access_token: str):
         data = res.json()
         return data.get("data", [])
 
+
+async def get_page_conversations(page_id: str, page_access_token: str) -> list:
+    """Fetch conversations for a Facebook Page."""
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            f"https://graph.facebook.com/v21.0/{page_id}/conversations",
+            params={
+                "fields": "id,updated_time,participants,snippet,unread_count,message_count",
+                "access_token": page_access_token
+            }
+        )
+        if res.status_code != 200:
+            logger.error(f"Error fetching FB conversations: {_extract_fb_error(res)}")
+            return []
+        data = res.json()
+        return data.get("data", [])
+
+
+async def get_conversation_messages(conversation_id: str, page_access_token: str) -> list:
+    """Fetch messages for a specific conversation thread."""
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            f"https://graph.facebook.com/v21.0/{conversation_id}/messages",
+            params={
+                "fields": "id,created_time,from,to,message,attachments",
+                "access_token": page_access_token
+            }
+        )
+        if res.status_code != 200:
+            logger.error(f"Error fetching FB messages: {_extract_fb_error(res)}")
+            return []
+        data = res.json()
+        return data.get("data", [])
+
+
+async def get_ig_conversations(ig_user_id: str, page_access_token: str) -> list:
+    """Fetch conversations for an Instagram Business Account."""
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            f"https://graph.facebook.com/v21.0/{ig_user_id}/conversations",
+            params={
+                "fields": "id,updated_time,participants,snippet,unread_count,message_count",
+                "access_token": page_access_token
+            }
+        )
+        if res.status_code != 200:
+            logger.error(f"Error fetching IG conversations: {_extract_fb_error(res)}")
+            return []
+        data = res.json()
+        return data.get("data", [])
+
