@@ -45,8 +45,10 @@ BROKEN_BACKEND_HOSTS = (
 
 
 def _clean_url(value: Optional[str]) -> str:
-    return (value or "").strip().rstrip("/")
-
+    val = (value or "").strip().rstrip("/")
+    if val.startswith("hhttps://"):
+        val = val.replace("hhttps://", "https://")
+    return val
 
 def _is_broken_backend_url(value: Optional[str]) -> bool:
     clean = _clean_url(value).lower()
