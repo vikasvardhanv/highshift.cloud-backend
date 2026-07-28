@@ -428,7 +428,7 @@ async def get_platform_connect_payload(
 
     if platform == "linkedin":
         client_id = os.getenv("LINKEDIN_CLIENT_ID")
-        redirect_uri = _platform_redirect_uri("linkedin", "LINKEDIN_REDIRECT_URI", default_redirect_uri)
+        redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI") or "https://highshift-cloud-backend.vercel.app/auth/linkedin/callback"
         scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social,email").split(",")
         await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, scopes)
         return {
@@ -439,7 +439,7 @@ async def get_platform_connect_payload(
 
     if platform == "youtube":
         client_id = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID")
-        redirect_uri = _platform_redirect_uri("youtube", "YOUTUBE_GOOGLE_REDIRECT_URI", default_redirect_uri)
+        redirect_uri = os.getenv("YOUTUBE_GOOGLE_REDIRECT_URI") or "https://highshift-cloud-backend.vercel.app/auth/youtube/callback"
         default_scopes = [
             "https://www.googleapis.com/auth/youtube.upload",
             "https://www.googleapis.com/auth/youtube.readonly",
