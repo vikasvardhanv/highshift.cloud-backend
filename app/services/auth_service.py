@@ -55,6 +55,10 @@ def _is_broken_backend_url(value: Optional[str]) -> bool:
 
 def get_backend_url() -> str:
     backend_url = _clean_url(os.getenv("BACKEND_URL"))
+    # Auto-fix accidental hhttps typo from environment variables
+    if backend_url.startswith("hhttps://"):
+        backend_url = backend_url.replace("hhttps://", "https://")
+        
     if not backend_url or _is_broken_backend_url(backend_url):
         return STABLE_BACKEND_URL
     return backend_url
