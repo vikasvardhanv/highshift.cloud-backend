@@ -66,14 +66,14 @@ def _redirect_uri_from_env_or_stable(
     default_redirect_uri: Optional[str] = None,
 ) -> str:
     configured = _clean_url(os.getenv(env_name))
-    if configured and not _is_broken_backend_url(configured):
+    if configured:
         return configured
 
     backend_url = get_backend_url()
     if backend_url:
         return f"{backend_url}/connect/{platform}/callback"
 
-    if default_redirect_uri and not _is_broken_backend_url(default_redirect_uri):
+    if default_redirect_uri:
         return default_redirect_uri
 
     raise HTTPException(status_code=500, detail=f"{env_name} not configured")
