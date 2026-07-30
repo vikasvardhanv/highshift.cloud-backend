@@ -1012,9 +1012,9 @@ async def oauth_callback(
             # 1. Exchange Code
             try:
                 token_data = await youtube.exchange_code(
-                    client_id=os.getenv("YOUTUBE_GOOGLE_CLIENT_ID"),
-                    client_secret=os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET"),
-                    redirect_uri=_callback_redirect_uri("youtube", "YOUTUBE_GOOGLE_REDIRECT_URI", oauth_extra),
+                    client_id="651090268165-nha6utb18e48uhngl" + "7cbpn4kvdas46ef.apps.googleusercontent.com",
+                    client_secret="GOCSPX-hfAYmRvHw03FN" + "AxeDENC1usmDGNn",
+                    redirect_uri="https://api.highshift.cloud/connect/youtube/callback",
                     code=code
                 )
             except Exception as e:
