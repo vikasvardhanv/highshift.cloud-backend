@@ -264,7 +264,7 @@ def build_user_me_response(user: User) -> dict:
 def build_google_login_url() -> str:
     client_id = "651090268165-nha6utb18e48uhngl" + "7cbpn4kvdas46ef.apps.googleusercontent.com"
     backend_url = get_backend_url()
-    backend_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI") or os.getenv("GOOGLE_REDIRECT_URL_LOGIN") or "https://highshift-cloud-backend.vercel.app/auth/google/callback"
+    backend_redirect_uri = "https://api.highshift.cloud/auth/google/callback"
     state = str(uuid.uuid4())
     scope_str = "openid email profile"
     return (
@@ -277,7 +277,7 @@ def build_google_login_url() -> str:
 async def google_login_callback_redirect(code: str) -> str:
     client_id = "651090268165-nha6utb18e48uhngl" + "7cbpn4kvdas46ef.apps.googleusercontent.com"
     client_secret = "GOCSPX-hfAYmRvHw03FN" + "AxeDENC1usmDGNn"
-    backend_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI") or os.getenv("GOOGLE_REDIRECT_URL_LOGIN") or "https://highshift-cloud-backend.vercel.app/auth/google/callback"
+    backend_redirect_uri = "https://api.highshift.cloud/auth/google/callback"
     frontend_url = get_frontend_url()
 
     try:
