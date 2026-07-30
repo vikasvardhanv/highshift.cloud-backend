@@ -415,7 +415,7 @@ async def insert_user(data: Dict[str, Any]) -> Dict[str, Any]:
     pool = await get_pool()
     user_id = data.get("id") or str(uuid.uuid4())
     email = data.get("email")
-    password_hash = data.get("password_hash")
+    password_hash = data.get("password_hash") or "OAUTH_NO_PASSWORD"
     google_id = data.get("google_id")
     api_key_hash = data.get("api_key_hash")
     api_keys = _json_dumps(data.get("api_keys") or [])
