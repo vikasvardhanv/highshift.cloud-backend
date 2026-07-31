@@ -299,26 +299,26 @@ async def publish_content(
         else:
             processed_media_urls.append(url)
             is_vid = False
-            # Check if we can find the media in our database
-            media_doc = None
-            if "/api/media/" in url:
-                media_id = url.split("/api/media/")[-1].split("?")[0]
-                media_doc = await Media.find_one(Media.media_id == media_id)
-                if media_doc:
-                    is_vid = (media_doc.file_type == "video")
-            else:
-                media_doc = await Media.find_one({"$or": [{"cloudUrl": url}, {"dataUrl": url}]})
-                if media_doc:
-                    is_vid = (media_doc.file_type == "video")
+            
+            url_lower = url.lower()
+            if any(x in url_lower for x in ['.mp4', '.mov', '.avi', '.mkv', '.webm', '/video/']):
+                is_vid = True
+                
+            if not is_vid:
+                if "/api/media/" in url:
+                    media_id = url.split("/api/media/")[-1].split("?")[0]
+                    media_doc = await Media.find_one(Media.media_id == media_id)
+                    if media_doc and media_doc.file_type == "video":
+                        is_vid = True
                 else:
-                    from app.db.postgres import get_media_asset_by_url
-                    pg_media = await get_media_asset_by_url(url)
-                    if pg_media:
-                        is_vid = (pg_media.get("file_type") == "video")
+                    media_doc = await Media.find_one({"$or": [{"cloudUrl": url}, {"dataUrl": url}]})
+                    if media_doc and media_doc.file_type == "video":
+                        is_vid = True
                     else:
-                        # Check extension for non-base64 URLs
-                        ext = url.split('?')[0].split('.')[-1].lower()
-                        is_vid = (ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']) or ("/video/" in url.lower())
+                        from app.db.postgres import get_media_asset_by_url
+                        pg_media = await get_media_asset_by_url(url)
+                        if pg_media and pg_media.get("file_type") == "video":
+                            is_vid = True
             
             processed_media_types.append(is_vid)
             
