@@ -100,9 +100,8 @@ def validate_platform_content(platform: str, content: str, has_media: bool, is_v
     
     has_text = bool(content and content.strip())
     
-    # Check if video is required
     if reqs.get("needs_video") and (not has_media or not is_video):
-        return reqs.get("error_msg", f"{platform} requires a video.")
+        return reqs.get("error_msg", f"{platform} requires a video.") + f" [DEBUG: has_media={has_media}, is_video={is_video}]"
     
     # Check if media is required
     if reqs.get("needs_media") and not has_media:
@@ -425,7 +424,8 @@ async def publish_content(
             has_media = bool(media_items)
             validation_error = validate_platform_content(platform, content, has_media, is_video)
             if validation_error:
-                results.append({"platform": platform, "status": "failed", "error": validation_error})
+                validation_error += f" | media_urls={media_urls} | media_items={media_items}"
+                results.append({"platform": platform, "status": "failed", "error": f"{platform}: {validation_error}"})
                 continue
             
             
