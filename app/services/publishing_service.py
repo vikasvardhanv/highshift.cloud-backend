@@ -294,12 +294,16 @@ async def publish_content(
         else:
             processed_media_urls.append(url)
             is_vid = False
-            # Check if it's our own media URL
+            # Check if we can find the media in our database
+            media_doc = None
             if "/api/media/" in url:
                 media_id = url.split("/api/media/")[-1].split("?")[0]
                 media_doc = await Media.find_one(Media.media_id == media_id)
-                if media_doc:
-                    is_vid = (media_doc.file_type == "video")
+            else:
+                media_doc = await Media.find_one({"$or": [{"cloudUrl": url}, {"dataUrl": url}]})
+                
+            if media_doc:
+                is_vid = (media_doc.file_type == "video")
             else:
                 # Check extension for non-base64 URLs
                 ext = url.split('?')[0].split('.')[-1].lower()
