@@ -313,7 +313,7 @@ async def publish_content(
                     else:
                         # Check extension for non-base64 URLs
                         ext = url.split('?')[0].split('.')[-1].lower()
-                        is_vid = (ext in ['mp4', 'mov', 'avi', 'mkv', 'webm'])
+                        is_vid = (ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']) or ("/video/" in url.lower())
             
             processed_media_types.append(is_vid)
             
