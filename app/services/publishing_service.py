@@ -293,9 +293,34 @@ async def publish_content(
             return {"results": [{"platform": "all", "status": "failed", "error": "Media is still uploading or invalid (blob URL). Please wait a moment and try again."}]}
         else:
             processed_media_urls.append(url)
-            # Check extension for non-base64 URLs
-            ext = url.split('?')[0].split('.')[-1].lower()
-            processed_media_types.append(ext in ['mp4', 'mov', 'avi', 'mkv', 'webm'])
+            is_vid = False
+            # Check if it's our own media URL
+            if "/api/media/" in url:
+                media_id = url.split("/api/media/")[-1].split("?")[0]
+                media_doc = await Media.find_one(Media.media_id == media_id)
+                if media_doc:
+                    is_vid = (media_doc.file_type == "video")
+            else:
+                # Check extension for non-base64 URLs
+                ext = url.split('?')[0].split('.')[-1].lower()
+                is_vid = (ext in ['mp4', 'mov', 'avi', 'mkv', 'webm'])
+            
+            processed_media_types.append(is_vid)
+            
+            # Download to temp file so item["path"] is available for YouTube/Mastodon
+            try:
+                async with httpx.AsyncClient(follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    ext = ".mp4" if is_vid else ".jpg"
+                    fd, path = tempfile.mkstemp(suffix=ext)
+                    with os.fdopen(fd, 'wb') as tmp:
+                        tmp.write(resp.content)
+                    processed_local_paths.append(path)
+                    temp_files_to_cleanup.append(path)
+            except Exception as e:
+                logger.error(f"Failed to download media URL {url}: {e}")
+                processed_local_paths.append(None)
 
     # Re-align media items based on processed inputs
     for i in range(max(len(processed_media_urls), len(processed_local_paths))):
