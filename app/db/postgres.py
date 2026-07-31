@@ -1181,6 +1181,18 @@ async def insert_media_asset(
     return dict(row)
 
 
+async def get_media_asset_by_url(url: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM media_assets WHERE cloud_url = $1 OR data_url = $1",
+            url
+        )
+        if row:
+            return dict(row)
+        return None
+
+
 async def list_media_assets(user_id: str, limit: int = 50, skip: int = 0):
     pool = await get_pool()
     async with pool.acquire() as conn:
