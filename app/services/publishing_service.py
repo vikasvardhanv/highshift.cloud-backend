@@ -585,10 +585,11 @@ async def publish_content(
 
             # --- YOUTUBE ---
             elif platform == "youtube":
-                if not is_video or not local_media_paths:
+                paths_for_upload = [item["path"] for item in media_items if item.get("path") and item.get("is_video")]
+                if not paths_for_upload:
                     results.append({"platform": "youtube", "status": "failed", "error": "YouTube requires a local video file."})
                     continue
-                res = await youtube.upload_video(token, local_media_paths[0], content[:100], content)
+                res = await youtube.upload_video(token, paths_for_upload[0], content[:100], content)
                 results.append({"platform": "youtube", "status": "success", "id": res.get("id")})
                 await insert_activity(str(user.id), "Posted to YouTube", platform="YouTube", type_="success")
 
@@ -624,8 +625,9 @@ async def publish_content(
                      continue
                 
                 media_ids = []
-                if local_media_paths:
-                    for path in local_media_paths:
+                paths_for_upload = [item["path"] for item in media_items if item.get("path")]
+                if paths_for_upload:
+                    for path in paths_for_upload:
                         m_res = await mastodon.upload_media(instance_url, token, path)
                         media_ids.append(m_res.get("id"))
                 
@@ -636,9 +638,10 @@ async def publish_content(
             # --- BLUESKY ---
             elif platform == "bluesky":
                 embed = None
-                if local_media_paths:
+                paths_for_upload = [item["path"] for item in media_items if item.get("path")]
+                if paths_for_upload:
                     images = []
-                    for path in local_media_paths[:len(local_media_paths)]:
+                    for path in paths_for_upload:
                         with open(path, "rb") as f:
                             img_data = f.read()
                             blob = await bluesky.upload_blob(token, img_data)
