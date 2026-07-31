@@ -161,8 +161,11 @@ async def upload_media_only(
             if not final_cloud_url:
                 default_mime = f"video/{ext}" if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm'] else f"image/{ext}"
                 mime_type = f.content_type or default_mime
-                if "image" in mime_type and ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
+                
+                # Aggressively force video MIME type if extension matches, bypassing any generic browser headers
+                if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
                     mime_type = f"video/{ext}"
+                    
                 base64_data = base64.b64encode(content).decode('utf-8')
                 final_data_url = f"data:{mime_type};base64,{base64_data}"
                 uploaded_urls.append(final_data_url)
