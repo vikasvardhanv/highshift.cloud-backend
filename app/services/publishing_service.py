@@ -290,8 +290,10 @@ async def publish_content(
                 logger.info(f"Saved base64 media to MongoDB: {media_doc.media_id} -> {public_url} (video={is_vid})")
                 
             except Exception as e:
-                logger.error(f"Failed to process base64 media: {e}")
-                processed_media_urls.append(None)
+                import traceback
+                error_trace = traceback.format_exc()
+                logger.error(f"Failed to process base64 media: {error_trace}")
+                processed_media_urls.append(f"EXCEPTION_CAUGHT: {str(e)} | TRACE: {error_trace}")
                 processed_media_types.append(False)
         elif url.startswith("blob:"):
             return {"results": [{"platform": "all", "status": "failed", "error": "Media is still uploading or invalid (blob URL). Please wait a moment and try again."}]}
