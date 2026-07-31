@@ -159,7 +159,10 @@ async def upload_media_only(
 
             # 2. If no cloud URL, use Base64 (Data URL) storage
             if not final_cloud_url:
-                mime_type = f.content_type or f"image/{ext}"
+                default_mime = f"video/{ext}" if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm'] else f"image/{ext}"
+                mime_type = f.content_type or default_mime
+                if "image" in mime_type and ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
+                    mime_type = f"video/{ext}"
                 base64_data = base64.b64encode(content).decode('utf-8')
                 final_data_url = f"data:{mime_type};base64,{base64_data}"
                 uploaded_urls.append(final_data_url)
@@ -180,8 +183,8 @@ async def upload_media_only(
             await insert_media_asset(
                 user_id=str(user.id),
                 filename=f.filename,
-                content_type=f.content_type or f"image/{ext}",
-                file_type="image" if "image" in (f.content_type or "") else "video",
+                content_type=mime_type if not final_cloud_url else (f.content_type or f"video/{ext}" if ext in ['mp4','mov'] else f"image/{ext}"),
+                file_type="video" if ext in ['mp4', 'mov', 'avi', 'mkv', 'webm'] else ("image" if "image" in (f.content_type or "") else "video"),
                 cloud_url=final_cloud_url,
                 data_url=final_data_url,
                 local_path=final_local_path,
