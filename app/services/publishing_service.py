@@ -275,25 +275,31 @@ async def publish_content(
                 temp_files_to_cleanup.append(path)
                 
                 # Also save to MongoDB for public URL (needed by Instagram, TikTok)
-                media_doc = Media(
-                    user_id=str(user.id),
-                    filename=f"upload{ext}",
-                    content_type=mime,
-                    file_type="video" if is_vid else "image",
-                    data_url=url,
-                    size_bytes=len(base64.b64decode(encoded))
-                )
-                await media_doc.insert()
-                public_url = media_doc.get_public_url()
+                # This will fail on Postgres-only setups, so we isolate the failure!
+                public_url = url
+                try:
+                    media_doc = Media(
+                        user_id=str(user.id),
+                        filename=f"upload{ext}",
+                        content_type=mime,
+                        file_type="video" if is_vid else "image",
+                        data_url=url,
+                        size_bytes=len(base64.b64decode(encoded))
+                    )
+                    await media_doc.insert()
+                    public_url = media_doc.get_public_url()
+                    logger.info(f"Saved base64 media to MongoDB: {media_doc.media_id} -> {public_url} (video={is_vid})")
+                except Exception as mongo_err:
+                    logger.warning(f"Skipping MongoDB media insert (likely Postgres environment): {mongo_err}")
+                
                 processed_media_urls.append(public_url)
                 processed_media_types.append(is_vid)
-                logger.info(f"Saved base64 media to MongoDB: {media_doc.media_id} -> {public_url} (video={is_vid})")
                 
             except Exception as e:
                 import traceback
                 error_trace = traceback.format_exc()
                 logger.error(f"Failed to process base64 media: {error_trace}")
-                processed_media_urls.append(f"EXCEPTION_CAUGHT: {str(e)} | TRACE: {error_trace}")
+                processed_media_urls.append(f"EXCEPTION_CAUGHT: {str(e)}")
                 processed_media_types.append(False)
         elif url.startswith("blob:"):
             return {"results": [{"platform": "all", "status": "failed", "error": "Media is still uploading or invalid (blob URL). Please wait a moment and try again."}]}
