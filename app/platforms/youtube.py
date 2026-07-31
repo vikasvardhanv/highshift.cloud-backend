@@ -80,9 +80,13 @@ async def upload_video(access_token: str, file_path: str, title: str, descriptio
 
     async with httpx.AsyncClient() as client:
         # Step 1: Initiate Resumable Upload
+        clean_title = title.strip() if title else "Untitled Video"
+        if not clean_title:
+            clean_title = "Untitled Video"
+            
         metadata = {
             "snippet": {
-                "title": title,
+                "title": clean_title,
                 "description": description,
                 "categoryId": "22" # People & Blogs default
             },
