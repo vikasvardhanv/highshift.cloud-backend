@@ -260,7 +260,12 @@ async def publish_content(
                 header, encoded = url.split(",", 1)
                 mime = header.split(";", 1)[0].split(":")[1]
                 ext = mimetypes.guess_extension(mime) or ".jpg"
-                is_vid = "video" in mime
+                
+                is_vid = ("video" in mime) or (ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm'])
+                if not is_vid and mime == "application/octet-stream":
+                    if encoded.startswith("AAAA") or encoded.startswith("AAAB") or "Z0eX" in encoded[:50]:
+                        is_vid = True
+                        ext = ".mp4"
                 
                 # Save to temporary file (for platforms like Facebook that support direct upload)
                 fd, path = tempfile.mkstemp(suffix=ext)
