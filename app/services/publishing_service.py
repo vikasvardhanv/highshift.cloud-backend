@@ -658,9 +658,13 @@ async def publish_content(
                 if not paths_for_upload:
                     results.append({"platform": "youtube", "status": "failed", "error": "YouTube requires a local video file."})
                     continue
-                res = await youtube.upload_video(token, paths_for_upload[0], content[:100], content)
-                results.append({"platform": "youtube", "status": "success", "id": res.get("id")})
-                await insert_activity(str(user.id), "Posted to YouTube", platform="YouTube", type_="success")
+                try:
+                    res = await youtube.upload_video(token, paths_for_upload[0], content[:100], content)
+                    results.append({"platform": "youtube", "status": "success", "id": res.get("id")})
+                    await insert_activity(str(user.id), "Posted to YouTube", platform="YouTube", type_="success")
+                except Exception as upload_err:
+                    logger.error(f"Failed to upload to YouTube: {upload_err}")
+                    results.append({"platform": "youtube", "status": "failed", "error": f"YouTube API Error: {str(upload_err)}"})
 
             # --- PINTEREST ---
             elif platform == "pinterest":
