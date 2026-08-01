@@ -32,6 +32,22 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
         res.raise_for_status()
         return res.json()
 
+async def refresh_access_token(client_id: str, client_secret: str, refresh_token: str):
+    async with httpx.AsyncClient() as client:
+        res = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token"
+            }
+        )
+        if res.status_code >= 400:
+            logger.warning(f"YouTube token refresh failed: {res.text}")
+        res.raise_for_status()
+        return res.json()
+
 async def get_me(access_token: str):
     """
     Fetch the YouTube channel information for the authenticated user.

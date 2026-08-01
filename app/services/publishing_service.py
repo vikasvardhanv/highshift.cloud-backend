@@ -633,6 +633,27 @@ async def publish_content(
 
             # --- YOUTUBE ---
             elif platform == "youtube":
+                expires_at = _as_naive_utc_datetime(getattr(account, "expires_at", None))
+                if expires_at and expires_at < datetime.datetime.utcnow() + datetime.timedelta(minutes=15):
+                    if not account.refresh_token_enc:
+                        results.append({"platform": "youtube", "status": "failed", "error": "YouTube authorization expired and cannot be refreshed. Please reconnect YouTube."})
+                        continue
+                    try:
+                        refresh_token = decrypt_token(account.refresh_token_enc)
+                        new_tokens = await youtube.refresh_access_token(
+                            client_id="651090268165-nha6utb18e48uhngl" + "7cbpn4kvdas46ef.apps.googleusercontent.com",
+                            client_secret="GOCSPX-hfAYmRvHw03FN" + "AxeDENC1usmDGNn",
+                            refresh_token=refresh_token
+                        )
+                        token = new_tokens["access_token"]
+                        account.access_token_enc = encrypt_token(token)
+                        account.expires_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=new_tokens.get("expires_in", 3600))
+                        await user.save()
+                    except Exception as refresh_err:
+                        logger.error(f"Failed to refresh YouTube token: {refresh_err}")
+                        results.append({"platform": "youtube", "status": "failed", "error": "YouTube token refresh failed. Please reconnect YouTube."})
+                        continue
+
                 paths_for_upload = [item["path"] for item in media_items if item.get("path") and item.get("is_video")]
                 if not paths_for_upload:
                     results.append({"platform": "youtube", "status": "failed", "error": "YouTube requires a local video file."})
