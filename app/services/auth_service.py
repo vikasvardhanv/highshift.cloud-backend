@@ -72,9 +72,8 @@ def _redirect_uri_from_env_or_stable(
     default_redirect_uri: Optional[str] = None,
 ) -> str:
     configured = _clean_url(os.getenv(env_name))
-    if configured:
+    if configured and "highshift-cloud-backend.vercel.app" not in configured:
         return configured
-
     backend_url = get_backend_url()
     if backend_url:
         return f"{backend_url}/connect/{platform}/callback"
@@ -428,7 +427,7 @@ async def get_platform_connect_payload(
 
     if platform == "linkedin":
         client_id = os.getenv("LINKEDIN_CLIENT_ID")
-        redirect_uri = _clean_url(os.getenv("LINKEDIN_REDIRECT_URI")) or "https://highshift-cloud-backend.vercel.app/auth/linkedin/callback"
+        redirect_uri = _platform_redirect_uri("linkedin", "LINKEDIN_REDIRECT_URI", default_redirect_uri)
         scopes = os.getenv("LINKEDIN_SCOPES", "openid,profile,w_member_social,email").split(",")
         await _store_oauth_redirect_state(state_id, state_payload, redirect_uri, scopes)
         return {
