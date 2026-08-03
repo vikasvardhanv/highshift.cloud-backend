@@ -730,14 +730,17 @@ async def publish_content(
                 results.append({"platform": platform, "status": "failed", "error": "Not implemented"})
 
         except Exception as e:
-            logger.error(f"Failed to post to {platform}: {e}", exc_info=True)
-            results.append({"platform": platform, "status": "failed", "error": str(e)})
+            import traceback
+            full_trace = traceback.format_exc()
+            err_str = str(e) if str(e) else repr(e)
+            logger.error(f"Failed to post to {platform}: {err_str}\n{full_trace}", exc_info=True)
+            results.append({"platform": platform, "status": "failed", "error": err_str})
             await insert_activity(
                 str(user.id),
                 f"Failed to post to {platform}",
                 platform=platform,
                 type_="error",
-                meta={"error": str(e)},
+                meta={"error": err_str, "trace": full_trace},
             )
 
     # Cleanup temporary files
