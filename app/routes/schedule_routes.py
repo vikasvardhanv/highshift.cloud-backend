@@ -14,15 +14,25 @@ def _iso(value):
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
+import asyncio
+
 async def _process_due_posts_safely(limit: int = 10):
     try:
         from app.services.postgres_scheduler_service import process_due_posts
-        stats = await process_due_posts(limit=limit)
-        if stats.get("processed"):
-            logger.info("Processed due scheduled posts from schedule route: %s", stats)
-        return stats
+        
+        async def background_process():
+            try:
+                stats = await process_due_posts(limit=limit)
+                if stats.get("processed"):
+                    logger.info("Processed due scheduled posts from schedule route: %s", stats)
+            except Exception as e:
+                logger.error("Background processing failed: %s", e)
+                
+        # Fire and forget without blocking the API response
+        asyncio.create_task(background_process())
+        return {"processed": 0, "status": "backgrounded"}
     except Exception as e:
-        logger.error("Failed to process due scheduled posts from schedule route: %s", e, exc_info=True)
+        logger.error("Failed to start background task: %s", e, exc_info=True)
         return {"processed": 0, "published": 0, "failed": 0, "error": str(e)}
 
 
