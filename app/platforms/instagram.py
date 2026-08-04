@@ -40,7 +40,7 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         logger.info(f"Instagram: Creating container for image_url={image_url[:100]}...")
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
-            params={
+            data={
                 "image_url": image_url,
                 "caption": caption or "",
                 "access_token": access_token
@@ -89,7 +89,7 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         logger.info(f"Instagram: Publishing container {container_id}...")
         pub_res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
-            params={"creation_id": container_id, "access_token": access_token}
+            data={"creation_id": container_id, "access_token": access_token}
         )
         pub_json = pub_res.json()
         logger.info(f"Instagram: Publish response: {pub_res.status_code} - {pub_json}")
@@ -111,7 +111,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
         # 1. Create container - use REELS for video content
         res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
-            params={
+            data={
                 "media_type": "REELS",  # Must be REELS, not VIDEO
                 "video_url": video_url,
                 "caption": caption,
@@ -143,7 +143,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
         # 3. Publish
         pub_res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
-            params={"creation_id": container_id, "access_token": access_token}
+            data={"creation_id": container_id, "access_token": access_token}
         )
         if pub_res.status_code != 200:
             error_data = pub_res.json().get("error", {})
@@ -171,7 +171,7 @@ async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list,
             else:
                 params["image_url"] = item["url"]
                 
-            res = await client.post(f"https://graph.facebook.com/v19.0/{ig_user_id}/media", params=params)
+            res = await client.post(f"https://graph.facebook.com/v19.0/{ig_user_id}/media", data=params)
             res.raise_for_status()
             item_ids.append(res.json().get("id"))
 
@@ -191,7 +191,7 @@ async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list,
         # 3. Create carousel container
         carousel_res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
-            params={
+            data={
                 "media_type": "CAROUSEL",
                 "children": ",".join(item_ids),
                 "caption": caption,
@@ -204,7 +204,7 @@ async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list,
         # 4. Publish carousel
         pub_res = await client.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
-            params={"creation_id": carousel_id, "access_token": access_token}
+            data={"creation_id": carousel_id, "access_token": access_token}
         )
         pub_res.raise_for_status()
         return pub_res.json()
