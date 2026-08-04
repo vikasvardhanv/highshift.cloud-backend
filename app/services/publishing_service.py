@@ -314,14 +314,21 @@ async def publish_content(
             if not is_vid:
                 if "/api/media/" in url:
                     media_id = url.split("/api/media/")[-1].split("?")[0]
-                    media_doc = await Media.find_one(Media.media_id == media_id)
-                    if media_doc and media_doc.file_type == "video":
-                        is_vid = True
+                    try:
+                        media_doc = await Media.find_one(Media.media_id == media_id)
+                        if media_doc and media_doc.file_type == "video":
+                            is_vid = True
+                    except Exception:
+                        pass
                 else:
-                    media_doc = await Media.find_one({"$or": [{"cloudUrl": url}, {"dataUrl": url}]})
-                    if media_doc and media_doc.file_type == "video":
-                        is_vid = True
-                    else:
+                    try:
+                        media_doc = await Media.find_one({"$or": [{"cloudUrl": url}, {"dataUrl": url}]})
+                        if media_doc and media_doc.file_type == "video":
+                            is_vid = True
+                    except Exception:
+                        pass
+                    
+                    if not is_vid:
                         from app.db.postgres import get_media_asset_by_url
                         pg_media = await get_media_asset_by_url(url)
                         if pg_media and pg_media.get("file_type") == "video":
