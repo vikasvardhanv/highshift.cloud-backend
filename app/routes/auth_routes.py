@@ -1335,13 +1335,13 @@ async def oauth_callback(
         if platform == "mastodon":
             # 1. Recover State to get instance_url, client_id, client_secret
             oauth_data = await get_oauth_state(state_id)
-            if not oauth_data or not oauth_data.extra_data:
+            if not oauth_data or not oauth_data.get("extra_data"):
                  return RedirectResponse(f"{frontend_url}/auth/callback?error=Invalid session state. Please try again.")
             
-            instance_url = oauth_data.extra_data.get("instance_url")
-            client_id = oauth_data.extra_data.get("client_id")
-            client_secret = oauth_data.extra_data.get("client_secret")
-            redirect_uri = oauth_data.extra_data.get("redirect_uri")
+            instance_url = oauth_data.get("extra_data").get("instance_url")
+            client_id = oauth_data.get("extra_data").get("client_id")
+            client_secret = oauth_data.get("extra_data").get("client_secret")
+            redirect_uri = oauth_data.get("extra_data").get("redirect_uri")
             
             # 2. Exchange Code
             token_data = await mastodon.exchange_code(
