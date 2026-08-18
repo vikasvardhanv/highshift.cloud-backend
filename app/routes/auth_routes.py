@@ -350,26 +350,29 @@ async def oauth_callback(
     oauth_extra = {}
     oauth_state_for_cleanup = None
     if platform != "twitter":
-        oauth_state_for_cleanup = await OAuthState.find_one({"state_id": state_id})
-        if oauth_state_for_cleanup and oauth_state_for_cleanup.extra_data:
-            oauth_extra = oauth_state_for_cleanup.extra_data
-            if isinstance(oauth_extra, str):
-                try:
-                    oauth_extra = json.loads(oauth_extra)
-                except (json.JSONDecodeError, TypeError):
-                    oauth_extra = {}
-            user_id_from_state = oauth_extra.get("user_id") or user_id_from_state
-            profile_id_from_state = oauth_extra.get("profile_id") or profile_id_from_state
+        oauth_state_data = await get_oauth_state(state_id)
+        if oauth_state_data:
+            oauth_state_for_cleanup = state_id
+            extra_data = oauth_state_data.get("extra_data")
+            if extra_data:
+                oauth_extra = extra_data
+                if isinstance(oauth_extra, str):
+                    try:
+                        oauth_extra = json.loads(oauth_extra)
+                    except (json.JSONDecodeError, TypeError):
+                        oauth_extra = {}
+                user_id_from_state = oauth_extra.get("user_id") or user_id_from_state
+                profile_id_from_state = oauth_extra.get("profile_id") or profile_id_from_state
     
     try:
         if platform == "twitter":
             # 1. Retrieve verifier
-            oauth_data = await OAuthState.find_one({"state_id": state_id})
+            oauth_data = await get_oauth_state(state_id)
             if not oauth_data:
                 raise HTTPException(status_code=400, detail="Invalid or expired state")
 
             # Defensive: ensure extra_data is always a dict
-            oauth_extra = oauth_data.extra_data or {}
+            oauth_extra = oauth_data.get("extra_data") or {}
             logger.debug(f"oauth_extra type={type(oauth_extra).__name__}, value={oauth_extra}")
             
             if isinstance(oauth_extra, str):
@@ -396,7 +399,7 @@ async def oauth_callback(
                 client_secret=os.getenv("TWITTER_CLIENT_SECRET"),
                 redirect_uri=redirect_uri,
                 code=code,
-                code_verifier=oauth_data.code_verifier
+                code_verifier=oauth_data.get("code_verifier")
             )
             
             # 3. Get profile
@@ -585,7 +588,7 @@ async def oauth_callback(
                 if api_key_to_return:
                     redirect_params["apiKey"] = api_key_to_return
                 if oauth_state_for_cleanup:
-                    await oauth_state_for_cleanup.delete()
+                    await delete_oauth_state(oauth_state_for_cleanup)
                 return RedirectResponse(
                     url=f"{frontend_url}/auth/callback?{urlencode(redirect_params)}"
                 )
@@ -661,7 +664,7 @@ async def oauth_callback(
                     await fallback_user.save()
 
                 if oauth_state_for_cleanup:
-                    await oauth_state_for_cleanup.delete()
+                    await delete_oauth_state(oauth_state_for_cleanup)
 
                 jwt_token = create_access_token(data={"sub": str(fallback_user.id)})
                 redirect_params = {
@@ -753,7 +756,7 @@ async def oauth_callback(
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
             if oauth_state_for_cleanup:
-                await oauth_state_for_cleanup.delete()
+                await delete_oauth_state(oauth_state_for_cleanup)
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
         if platform == "instagram":
@@ -860,7 +863,7 @@ async def oauth_callback(
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
             if oauth_state_for_cleanup:
-                await oauth_state_for_cleanup.delete()
+                await delete_oauth_state(oauth_state_for_cleanup)
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
         if platform == "linkedin":
@@ -1005,7 +1008,7 @@ async def oauth_callback(
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
             if oauth_state_for_cleanup:
-                await oauth_state_for_cleanup.delete()
+                await delete_oauth_state(oauth_state_for_cleanup)
             
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
@@ -1098,7 +1101,7 @@ async def oauth_callback(
             if api_key_to_return:
                 redirect_params += f"&apiKey={api_key_to_return}"
             if oauth_state_for_cleanup:
-                await oauth_state_for_cleanup.delete()
+                await delete_oauth_state(oauth_state_for_cleanup)
             
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
@@ -1331,7 +1334,7 @@ async def oauth_callback(
 
         if platform == "mastodon":
             # 1. Recover State to get instance_url, client_id, client_secret
-            oauth_data = await OAuthState.find_one({"state_id": state_id})
+            oauth_data = await get_oauth_state(state_id)
             if not oauth_data or not oauth_data.extra_data:
                  return RedirectResponse(f"{frontend_url}/auth/callback?error=Invalid session state. Please try again.")
             
