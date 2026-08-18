@@ -40,7 +40,7 @@ async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, c
             res.raise_for_status()
         except httpx.HTTPStatusError as e:
             logger.error(f"LinkedIn token exchange HTTP error: {e.response.text}")
-            raise Exception(f"Client error '{e.response.status_code}' for url '{e.request.url}': {e.response.text}")
+            raise Exception(f"Client error '{e.response.status_code}' for url '{e.request.url}': {e.response.text} | SENT URI: {redirect_uri}")
         return res.json()
 
 async def post_to_profile(access_token: str, author_urn: str, text: str):
