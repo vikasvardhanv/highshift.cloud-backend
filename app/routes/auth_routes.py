@@ -49,7 +49,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"], dependencies=[Depends(ensure_d
 def _callback_redirect_uri(platform: str, env_name: str, oauth_extra: dict) -> str:
     redirect_uri = (oauth_extra.get("redirect_uri") or os.getenv(env_name) or "").strip()
     if not redirect_uri or "highshift-cloud-backend.vercel.app" in redirect_uri:
-        redirect_uri = f"{get_backend_url()}/connect/{platform}/callback"
+        redirect_uri = f"{get_backend_url()}/auth/connect/{platform}/callback"
     return redirect_uri
 
 # --- Pydantic Models for Auth ---
@@ -292,6 +292,7 @@ async def connect_bluesky(data: BlueskyLogin, user: User = Depends(get_current_u
 
 # Support both /auth/{platform}/callback AND /connect/{platform}/callback
 @router.get("/{platform}/callback")
+@router.get("/connect/{platform}/callback")
 async def oauth_callback(
     platform: str,
     request: Request,
