@@ -73,10 +73,13 @@ def _redirect_uri_from_env_or_stable(
 ) -> str:
     configured = _clean_url(os.getenv(env_name))
     if configured and "highshift-cloud-backend.vercel.app" not in configured:
+        # Hotfix for Coolify environment variables missing /auth/
+        if "api.highshift.cloud/connect" in configured:
+            configured = configured.replace("api.highshift.cloud/connect", "api.highshift.cloud/auth/connect")
         return configured
     backend_url = get_backend_url()
     if backend_url:
-        return f"{backend_url}/connect/{platform}/callback"
+        return f"{backend_url}/auth/connect/{platform}/callback"
 
     if default_redirect_uri:
         return default_redirect_uri

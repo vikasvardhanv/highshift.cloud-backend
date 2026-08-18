@@ -50,6 +50,8 @@ def _callback_redirect_uri(platform: str, env_name: str, oauth_extra: dict) -> s
     redirect_uri = (oauth_extra.get("redirect_uri") or os.getenv(env_name) or "").strip()
     if not redirect_uri or "highshift-cloud-backend.vercel.app" in redirect_uri:
         redirect_uri = f"{get_backend_url()}/auth/connect/{platform}/callback"
+    elif "api.highshift.cloud/connect" in redirect_uri:
+        redirect_uri = redirect_uri.replace("api.highshift.cloud/connect", "api.highshift.cloud/auth/connect")
     return redirect_uri
 
 # --- Pydantic Models for Auth ---
