@@ -17,7 +17,7 @@ from app.utils.auth import (
     create_access_token
 )
 from app.models.user import User, LinkedAccount, ApiKey
-from app.models.oauth_state import OAuthState
+from app.db.postgres import get_oauth_state, delete_oauth_state
 from app.platforms import instagram, twitter, facebook, linkedin, youtube, tiktok, pinterest, threads, bluesky, mastodon
 from app.services.token_service import encrypt_token
 from app.services.auth_service import (
