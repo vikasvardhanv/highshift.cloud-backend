@@ -10,12 +10,12 @@ async def get_auth_url(client_id: str, redirect_uri: str, state: str, scopes: li
         "response_type": "code",
         "scope": ",".join(scopes)
     }
-    return f"https://www.facebook.com/v19.0/dialog/oauth?{urlencode(params)}"
+    return f"https://www.facebook.com/v21.0/dialog/oauth?{urlencode(params)}"
 
 async def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v19.0/oauth/access_token",
+            "https://graph.facebook.com/v21.0/oauth/access_token",
             params={
                 "client_id": client_id,
                 "client_secret": client_secret,
@@ -39,7 +39,7 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         # 1. Create container
         logger.info(f"Instagram: Creating container for image_url={image_url[:100]}...")
         res = await client.post(
-            f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
+            f"https://graph.facebook.com/v21.0/{ig_user_id}/media",
             data={
                 "image_url": image_url,
                 "caption": caption or "",
@@ -66,7 +66,7 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         last_status = None
         for attempt in range(max_retries):
             status_res = await client.get(
-                f"https://graph.facebook.com/v19.0/{container_id}",
+                f"https://graph.facebook.com/v21.0/{container_id}",
                 params={"fields": "status_code,status", "access_token": access_token}
             )
             status_data = status_res.json()
@@ -88,7 +88,7 @@ async def publish_image(access_token: str, ig_user_id: str, image_url: str, capt
         # 3. Publish
         logger.info(f"Instagram: Publishing container {container_id}...")
         pub_res = await client.post(
-            f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
+            f"https://graph.facebook.com/v21.0/{ig_user_id}/media_publish",
             data={"creation_id": container_id, "access_token": access_token}
         )
         pub_json = pub_res.json()
@@ -110,7 +110,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
     async with httpx.AsyncClient(timeout=60.0) as client:
         # 1. Create container - use REELS for video content
         res = await client.post(
-            f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
+            f"https://graph.facebook.com/v21.0/{ig_user_id}/media",
             data={
                 "media_type": "REELS",  # Must be REELS, not VIDEO
                 "video_url": video_url,
@@ -130,7 +130,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
         max_retries = 30
         for _ in range(max_retries):
             status_res = await client.get(
-                f"https://graph.facebook.com/v19.0/{container_id}",
+                f"https://graph.facebook.com/v21.0/{container_id}",
                 params={"fields": "status_code", "access_token": access_token}
             )
             data = status_res.json()
@@ -142,7 +142,7 @@ async def publish_video(access_token: str, ig_user_id: str, video_url: str, capt
 
         # 3. Publish
         pub_res = await client.post(
-            f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
+            f"https://graph.facebook.com/v21.0/{ig_user_id}/media_publish",
             data={"creation_id": container_id, "access_token": access_token}
         )
         if pub_res.status_code != 200:
@@ -171,7 +171,7 @@ async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list,
             else:
                 params["image_url"] = item["url"]
                 
-            res = await client.post(f"https://graph.facebook.com/v19.0/{ig_user_id}/media", data=params)
+            res = await client.post(f"https://graph.facebook.com/v21.0/{ig_user_id}/media", data=params)
             res.raise_for_status()
             item_ids.append(res.json().get("id"))
 
@@ -181,7 +181,7 @@ async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list,
             max_retries = 20
             for _ in range(max_retries):
                 status_res = await client.get(
-                    f"https://graph.facebook.com/v19.0/{container_id}",
+                    f"https://graph.facebook.com/v21.0/{container_id}",
                     params={"fields": "status_code", "access_token": access_token}
                 )
                 if status_res.json().get("status_code") == "FINISHED":
@@ -190,7 +190,7 @@ async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list,
 
         # 3. Create carousel container
         carousel_res = await client.post(
-            f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
+            f"https://graph.facebook.com/v21.0/{ig_user_id}/media",
             data={
                 "media_type": "CAROUSEL",
                 "children": ",".join(item_ids),
@@ -203,7 +203,7 @@ async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list,
 
         # 4. Publish carousel
         pub_res = await client.post(
-            f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
+            f"https://graph.facebook.com/v21.0/{ig_user_id}/media_publish",
             data={"creation_id": carousel_id, "access_token": access_token}
         )
         pub_res.raise_for_status()
@@ -212,7 +212,7 @@ async def publish_carousel(access_token: str, ig_user_id: str, media_urls: list,
 async def get_me(access_token: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
-            "https://graph.facebook.com/v19.0/me",
+            "https://graph.facebook.com/v21.0/me",
             params={
                 "fields": "id,name,username,account_type,media_count",
                 "access_token": access_token

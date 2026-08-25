@@ -65,9 +65,9 @@ class TestVideoPublishing(unittest.IsolatedAsyncioTestCase):
         
         # Verify Create Container call
         create_call = mock_client.post.call_args_list[0]
-        params = create_call.kwargs["params"]
-        self.assertEqual(params["media_type"], "REELS")
-        self.assertEqual(params["video_url"], "http://vid.url/1.mp4")
+        data = create_call.kwargs["data"]
+        self.assertEqual(data["media_type"], "REELS")
+        self.assertEqual(data["video_url"], "http://vid.url/1.mp4")
         print("✅ Instagram Video Publish verified")
 
     @patch("httpx.AsyncClient")

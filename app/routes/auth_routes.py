@@ -497,13 +497,17 @@ async def oauth_callback(
         # Fallback for other platforms (similar logic needed)
         if platform == "facebook":
             # 1. Exchange code
-            # Define Scopes Explicitly - these should match what get_auth_url uses
-            token_data = await facebook.exchange_code(
-                client_id=os.getenv("FACEBOOK_APP_ID"),
-                client_secret=os.getenv("FACEBOOK_APP_SECRET"),
-                redirect_uri=_callback_redirect_uri("facebook", "FACEBOOK_REDIRECT_URI", oauth_extra),
-                code=code
-            )
+            try:
+                token_data = await facebook.exchange_code(
+                    client_id=os.getenv("FACEBOOK_APP_ID"),
+                    client_secret=os.getenv("FACEBOOK_APP_SECRET"),
+                    redirect_uri=_callback_redirect_uri("facebook", "FACEBOOK_REDIRECT_URI", oauth_extra),
+                    code=code
+                )
+            except Exception as e:
+                logger.error(f"Facebook token exchange failed: {e}")
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=Facebook token exchange failed. Please try again.")
+
             user_access_token = token_data.get("access_token")
             
             if not user_access_token:
@@ -762,13 +766,17 @@ async def oauth_callback(
             return RedirectResponse(url=f"{frontend_url}/auth/callback?{redirect_params}")
 
         if platform == "instagram":
-            # 1. Exchange code
-            token_data = await instagram.exchange_code(
-                client_id=os.getenv("FACEBOOK_APP_ID"), 
-                client_secret=os.getenv("FACEBOOK_APP_SECRET"),
-                redirect_uri=_callback_redirect_uri("instagram", "INSTAGRAM_REDIRECT_URI", oauth_extra),
-                code=code
-            )
+            try:
+                token_data = await instagram.exchange_code(
+                    client_id=os.getenv("FACEBOOK_APP_ID"), 
+                    client_secret=os.getenv("FACEBOOK_APP_SECRET"),
+                    redirect_uri=_callback_redirect_uri("instagram", "INSTAGRAM_REDIRECT_URI", oauth_extra),
+                    code=code
+                )
+            except Exception as e:
+                logger.error(f"Instagram token exchange failed: {e}")
+                return RedirectResponse(f"{frontend_url}/auth/callback?error=Instagram token exchange failed. Please try again.")
+
             user_access_token = token_data.get("access_token")
 
             try:
