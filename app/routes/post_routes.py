@@ -91,7 +91,7 @@ async def upload_and_post(
                 
                 # Add to media URLs for others; external APIs need absolute public URLs.
                 # Using relative path? APIs need absolute http/s.
-                domain = os.getenv("API_BASE_URL", "https://api.highshift.cloud")
+                domain = os.getenv("API_BASE_URL", "https://api.socialraven.online")
                 public_url = f"{domain}/static/uploads/{filename}"
                 media.append(public_url)
                 

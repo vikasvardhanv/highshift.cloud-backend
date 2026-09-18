@@ -670,7 +670,13 @@ async def _ensure_schedule_queue(conn) -> None:
     )
 
 
+_cached_scheduled_post_columns = None
+
 async def _scheduled_post_columns(conn) -> Dict[str, str]:
+    global _cached_scheduled_post_columns
+    if _cached_scheduled_post_columns is not None:
+        return _cached_scheduled_post_columns
+        
     rows = await conn.fetch(
         """
         select column_name, data_type
@@ -678,7 +684,8 @@ async def _scheduled_post_columns(conn) -> Dict[str, str]:
         where table_schema='public' and table_name='scheduled_posts'
         """
     )
-    return {row["column_name"]: row["data_type"] for row in rows}
+    _cached_scheduled_post_columns = {row["column_name"]: row["data_type"] for row in rows}
+    return _cached_scheduled_post_columns
 
 
 async def _get_columns(table_name: str) -> Dict[str, str]:

@@ -50,8 +50,8 @@ def _callback_redirect_uri(platform: str, env_name: str, oauth_extra: dict) -> s
     redirect_uri = (oauth_extra.get("redirect_uri") or os.getenv(env_name) or "").strip()
     if not redirect_uri or "highshift-cloud-backend.vercel.app" in redirect_uri:
         redirect_uri = f"{get_backend_url()}/auth/connect/{platform}/callback"
-    elif "api.highshift.cloud/connect" in redirect_uri:
-        redirect_uri = redirect_uri.replace("api.highshift.cloud/connect", "api.highshift.cloud/auth/connect")
+    elif "api.socialraven.online/connect" in redirect_uri:
+        redirect_uri = redirect_uri.replace("api.socialraven.online/connect", "api.socialraven.online/auth/connect")
     return redirect_uri
 
 # --- Pydantic Models for Auth ---
@@ -1028,7 +1028,7 @@ async def oauth_callback(
                 token_data = await youtube.exchange_code(
                     client_id="651090268165-nha6utb18e48uhngl" + "7cbpn4kvdas46ef.apps.googleusercontent.com",
                     client_secret="GOCSPX-hfAYmRvHw03FN" + "AxeDENC1usmDGNn",
-                    redirect_uri="https://api.highshift.cloud/connect/youtube/callback",
+                    redirect_uri="https://api.socialraven.online/connect/youtube/callback",
                     code=code
                 )
             except Exception as e:

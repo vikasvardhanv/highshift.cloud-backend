@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_URL = "https://api.highshift.cloud"
+BASE_URL = "https://api.socialraven.online"
 
 async def test_auth_flow():
     async with httpx.AsyncClient() as client:
