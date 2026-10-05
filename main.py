@@ -283,4 +283,6 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 3000)), reload=True)
+    # reload=True is a dev-only flag; for local hot reload run:
+    #   uvicorn main:app --reload
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 3000)))
