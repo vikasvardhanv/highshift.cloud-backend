@@ -60,8 +60,29 @@ async def init_postgres(database_url: str) -> bool:
 
     pg_url = _normalize_pg_url(database_url)
     try:
-        _pool = await asyncpg.create_pool(pg_url, min_size=1, max_size=5, timeout=12)
+        # Tables live in their own schema on a shared Supabase instance, so
+        # unqualified names ("select * from users") need a search_path.
+        # DB_SCHEMA keeps this configurable; "public" reproduces the old behaviour.
+        schema = os.getenv("DB_SCHEMA", "socialraven")
+        _pool = await asyncpg.create_pool(
+            pg_url,
+            min_size=1,
+            max_size=5,
+            timeout=12,
+            server_settings={"search_path": f"{schema},public"},
+        )
         async with _pool.acquire() as conn:
+            # Fail loudly rather than silently falling back to public: if the
+            # schema is missing, current_schema() resolves to the next entry in
+            # search_path and every table below would be created in the wrong
+            # place (on a shared instance, that means other apps' schema).
+            active = await conn.fetchval("select current_schema()")
+            if active != schema:
+                raise RuntimeError(
+                    f"Expected schema {schema!r} but connected to {active!r}. "
+                    f"Refusing to create tables in the wrong schema."
+                )
+
             # Enable UUID extension
             await conn.execute("create extension if not exists pgcrypto;")
             
@@ -311,7 +332,7 @@ async def init_postgres(database_url: str) -> bool:
             # Verify tables exist
             result = await conn.fetch("""
                 select table_name from information_schema.tables 
-                where table_schema = 'public' order by table_name;
+                where table_schema = current_schema() order by table_name;
             """)
             existing_tables = [r['table_name'] for r in result]
             print(f"Database tables: {existing_tables}")
@@ -681,7 +702,7 @@ async def _scheduled_post_columns(conn) -> Dict[str, str]:
         """
         select column_name, data_type
         from information_schema.columns
-        where table_schema='public' and table_name='scheduled_posts'
+        where table_schema=current_schema() and table_name='scheduled_posts'
         """
     )
     _cached_scheduled_post_columns = {row["column_name"]: row["data_type"] for row in rows}
@@ -695,7 +716,7 @@ async def _get_columns(table_name: str) -> Dict[str, str]:
             f"""
             select column_name, data_type
             from information_schema.columns
-            where table_schema='public' and table_name='{table_name}'
+            where table_schema=current_schema() and table_name='{table_name}'
             """
         )
         return {row["column_name"]: row["data_type"] for row in rows}

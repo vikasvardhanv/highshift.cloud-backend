@@ -124,7 +124,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Social Raven AI Backend", version="1.0.0", lifespan=lifespan)
 
 # CORS configuration
-# Priority: Get from env, but handle the case where env is empty or just "*"
+# Origins come from CORS_ORIGINS (comma separated) plus the known production domains.
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").strip().lower()
+IS_DEV = ENVIRONMENT in {"dev", "development", "local"}
+
 env_origins = os.getenv("CORS_ORIGINS", "").split(",")
 origins = [o.strip().rstrip("/") for o in env_origins if o.strip()]
 origin_regex = os.getenv(
@@ -150,11 +153,29 @@ for d in production_domains:
     if normalized not in origins:
         origins.append(normalized)
 
-# For development, if "*" is in origins, we allow all
-if "*" in origins or not origins:
+
+def _is_credentialed_safe(origin: str) -> bool:
+    """Cookies and Authorization headers go to every allowed origin, so a
+    plaintext http origin is only acceptable for loopback development hosts."""
+    if origin.startswith("https://"):
+        return True
+    return origin.startswith(("http://localhost", "http://127.0.0.1"))
+
+
+_rejected = [o for o in origins if not _is_credentialed_safe(o)]
+origins = [o for o in origins if _is_credentialed_safe(o)]
+if _rejected:
+    logging.getLogger("main").warning(
+        "Ignoring insecure CORS origins (credentials require https or loopback): %s",
+        ", ".join(_rejected),
+    )
+
+# Wildcard is opt-in. An empty CORS_ORIGINS must never silently allow every origin.
+allow_all = IS_DEV and os.getenv("CORS_ALLOW_ALL", "false").strip().lower() in {"1", "true", "yes"}
+if allow_all:
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=".*",  # Allows all origins with credentials (DEV ONLY)
+        allow_origin_regex=".*",  # DEV ONLY: echoes any origin back, with credentials
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -186,7 +207,7 @@ class ErrorMiddleware(BaseHTTPMiddleware):
             logger.error(f"Unhandled Exception: {e}", exc_info=True)
             
             # Create error response
-            content = {"detail": f"Internal Server Error: {str(e)}", "error": str(e)}
+            content = {"detail": "Internal Server Error"}
             response = JSONResponse(status_code=500, content=content)
             
             # MANUALLY ADD CORS HEADERS for errors
@@ -195,7 +216,7 @@ class ErrorMiddleware(BaseHTTPMiddleware):
                 # Basic check: allow if in our list or if we are in wildcard mode
                 normalized_origin = origin.rstrip("/")
                 if (
-                    "*" in origins
+                    allow_all
                     or normalized_origin in origins
                     or origin_re.match(normalized_origin)
                 ):
@@ -283,4 +304,6 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 3000)), reload=True)
+    # reload=True is a dev-only flag; for local hot reload run:
+    #   uvicorn main:app --reload
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 3000)))
