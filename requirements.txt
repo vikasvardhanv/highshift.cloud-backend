@@ -18,3 +18,5 @@ google-genai
 asyncpg
 temporalio
 pillow
+redis
+sentry-sdk
