@@ -221,7 +221,7 @@ app.include_router(account_routes.router)
 app.include_router(activity_routes.router)
 from app.routes import legacy_routes, profile_routes, media_routes, cron_routes
 from app.routes.auth_routes import connect_router
-from app.routes import org_routes, notification_routes, webhook_routes, autopost_routes, inbox_routes
+from app.routes import org_routes, notification_routes, webhook_routes, autopost_routes, inbox_routes, video_tools_routes
 
 app.include_router(legacy_routes.router)
 app.include_router(profile_routes.router)
@@ -235,6 +235,7 @@ app.include_router(org_routes.router)
 app.include_router(notification_routes.router)
 app.include_router(webhook_routes.router)
 app.include_router(autopost_routes.router)
+app.include_router(video_tools_routes.router)  # Video downloader + uniquifier
 
 from fastapi.staticfiles import StaticFiles
 
