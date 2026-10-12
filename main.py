@@ -2,13 +2,20 @@ import os
 import re
 import logging
 import asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.openapi.utils import get_openapi
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from contextlib import suppress
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.asyncio import AsyncioIntegration
+
 from app.models.user import User
 from app.models.brand_kit import BrandKit
 from app.models.scheduled_post import ScheduledPost
@@ -32,6 +39,20 @@ from app.routes import (
 
 # Load environment variables
 load_dotenv()
+
+# Initialize Sentry for error tracking
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            FastApiIntegration(auto_enabling_instrumentations=True),
+            AsyncioIntegration(),
+        ],
+        traces_sample_rate=0.1,
+        profiles_sample_rate=0.1,
+        environment=os.getenv("ENVIRONMENT", "production"),
+    )
 
 db_initialized = False
 
@@ -87,6 +108,7 @@ async def ensure_beanie_initialized():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup
     await ensure_beanie_initialized()
     temporal_worker_task = None
     
@@ -121,10 +143,24 @@ async def lifespan(app: FastAPI):
         with suppress(asyncio.CancelledError):
             await temporal_worker_task
 
-app = FastAPI(title="Social Raven AI Backend", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="Social Raven AI Backend", 
+    version="1.0.0", 
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
+)
 
-# CORS configuration
-# Priority: Get from env, but handle the case where env is empty or just "*"
+# --- Middleware Stack (order matters!) ---
+
+# 1. GZip Compression (should be first)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# 2. CORS Configuration
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").strip().lower()
+IS_DEV = ENVIRONMENT in {"dev", "development", "local"}
+
 env_origins = os.getenv("CORS_ORIGINS", "").split(",")
 origins = [o.strip().rstrip("/") for o in env_origins if o.strip()]
 origin_regex = os.getenv(
@@ -150,11 +186,29 @@ for d in production_domains:
     if normalized not in origins:
         origins.append(normalized)
 
-# For development, if "*" is in origins, we allow all
-if "*" in origins or not origins:
+
+def _is_credentialed_safe(origin: str) -> bool:
+    """Cookies and Authorization headers go to every allowed origin, so a
+    plaintext http origin is only acceptable for loopback development hosts."""
+    if origin.startswith("https://"):
+        return True
+    return origin.startswith(("http://localhost", "http://127.0.0.1"))
+
+
+_rejected = [o for o in origins if not _is_credentialed_safe(o)]
+origins = [o for o in origins if _is_credentialed_safe(o)]
+if _rejected:
+    logging.getLogger("main").warning(
+        "Ignoring insecure CORS origins (credentials require https or loopback): %s",
+        ", ".join(_rejected),
+    )
+
+# Wildcard is opt-in. An empty CORS_ORIGINS must never silently allow every origin.
+allow_all = IS_DEV and os.getenv("CORS_ALLOW_ALL", "false").strip().lower() in {"1", "true", "yes"}
+if allow_all:
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=".*",  # Allows all origins with credentials (DEV ONLY)
+        allow_origin_regex=".*",  # DEV ONLY: echoes any origin back, with credentials
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -171,40 +225,83 @@ else:
         expose_headers=["*"]
     )
 
-# --- Global Exception Handler to Ensure CORS Headers on 500s ---
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+# 3. Global Exception Handler to Ensure CORS Headers on 500s
+class ErrorMiddleware:
+    def __init__(self, app):
+        self.app = app
 
-class ErrorMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                # Add CORS headers to error responses
+                origin = None
+                for header in scope.get("headers", []):
+                    if header[0] == b"origin":
+                        origin = header[1].decode()
+                        break
+                
+                if origin:
+                    normalized_origin = origin.rstrip("/")
+                    if (
+                        allow_all
+                        or normalized_origin in origins
+                        or origin_re.match(normalized_origin)
+                    ):
+                        # Check if this is an error response
+                        if message.get("status", 200) >= 400:
+                            headers = list(message.get("headers", []))
+                            headers.append((b"access-control-allow-origin", origin.encode()))
+                            headers.append((b"access-control-allow-credentials", b"true"))
+                            headers.append((b"access-control-allow-methods", b"*"))
+                            headers.append((b"access-control-allow-headers", b"*"))
+                            message["headers"] = headers
+            
+            await send(message)
+
         try:
-            response = await call_next(request)
-            return response
+            await self.app(scope, receive, send_wrapper)
         except Exception as e:
             logger = logging.getLogger("main")
             logger.error(f"Unhandled Exception: {e}", exc_info=True)
             
-            # Create error response
-            content = {"detail": f"Internal Server Error: {str(e)}", "error": str(e)}
-            response = JSONResponse(status_code=500, content=content)
+            # Send error response with CORS headers
+            origin_header = None
+            for header in scope.get("headers", []):
+                if header[0] == b"origin":
+                    origin_header = header[1].decode()
+                    break
             
-            # MANUALLY ADD CORS HEADERS for errors
-            origin = request.headers.get("origin")
-            if origin:
-                # Basic check: allow if in our list or if we are in wildcard mode
-                normalized_origin = origin.rstrip("/")
+            cors_headers = []
+            if origin_header:
+                normalized_origin = origin_header.rstrip("/")
                 if (
-                    "*" in origins
+                    allow_all
                     or normalized_origin in origins
                     or origin_re.match(normalized_origin)
                 ):
-                    response.headers["Access-Control-Allow-Origin"] = origin
-                    response.headers["Access-Control-Allow-Credentials"] = "true"
-                    response.headers["Access-Control-Allow-Methods"] = "*"
-                    response.headers["Access-Control-Allow-Headers"] = "*"
+                    cors_headers = [
+                        (b"access-control-allow-origin", origin_header.encode()),
+                        (b"access-control-allow-credentials", b"true"),
+                        (b"access-control-allow-methods", b"*"),
+                        (b"access-control-allow-headers", b"*"),
+                    ]
             
-            return response
+            await send({
+                "type": "http.response.start",
+                "status": 500,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    *cors_headers,
+                ],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": b'{"detail": "Internal Server Error"}',
+            })
 
 app.add_middleware(ErrorMiddleware)
 
@@ -251,13 +348,108 @@ except Exception as e:
     # Log warning but don't crash the app
     print(f"WARNING: Static file serving could not be initialized (likely read-only filesystem): {e}")
 
+# Configuration Checker (Postiz-style)
+def check_configuration():
+    """Validate required environment variables on startup."""
+    issues = []
+    warnings = []
+    
+    required_vars = [
+        "DATABASE_URL",
+        "JWT_SECRET",
+    ]
+    
+    recommended_vars = [
+        "CORS_ORIGINS",
+        "FRONTEND_URL",
+        "BACKEND_URL",
+        "SENTRY_DSN",
+        "REDIS_URL",
+    ]
+    
+    for var in required_vars:
+        if not os.getenv(var):
+            issues.append(f"Missing required environment variable: {var}")
+    
+    for var in recommended_vars:
+        if not os.getenv(var):
+            warnings.append(f"Recommended environment variable not set: {var}")
+    
+    # Check JWT secret strength
+    jwt_secret = os.getenv("JWT_SECRET", "")
+    if jwt_secret and jwt_secret in ("changethis_secret_key_please", "secret", "test"):
+        warnings.append("JWT_SECRET appears to be using a default/weak value")
+    
+    if issues:
+        for issue in issues:
+            logging.getLogger("main").error(f"CONFIG ERROR: {issue}")
+        raise RuntimeError(f"Configuration errors: {'; '.join(issues)}")
+    
+    for warning in warnings:
+        logging.getLogger("main").warning(f"CONFIG WARNING: {warning}")
+    
+    if not issues:
+        print("Configuration check completed without any issues")
+
+# Run configuration check on startup
+check_configuration()
+
+# Custom OpenAPI schema with security schemes
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title="Social Raven AI Backend",
+        version="1.0.0",
+        description="Social media management API with AI-powered content generation",
+        routes=app.routes,
+    )
+    
+    # Add security schemes
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        },
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+        },
+    }
+    
+    # Apply security globally
+    openapi_schema["security"] = [
+        {"BearerAuth": []},
+        {"ApiKeyAuth": []},
+    ]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
 @app.get("/health")
 async def health_check():
-    #global db_initialized
     db_url = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")
     postgres_mode = is_postgres_url(db_url)
+    redis_status = "unknown"
+    
+    # Check Redis if configured
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        try:
+            import redis.asyncio as redis
+            r = redis.from_url(redis_url)
+            await r.ping()
+            await r.close()
+            redis_status = "connected"
+        except Exception as e:
+            redis_status = f"error: {str(e)}"
+    
     try:
-        # Check if initialized
         if not db_initialized:
             await ensure_beanie_initialized()
 
@@ -271,17 +463,30 @@ async def health_check():
     except Exception as e:
         db_status = f"error: {str(e)}"
         
+    overall_status = "ok"
+    if "error" in db_status or "error" in redis_status:
+        overall_status = "degraded"
+    if "error" in db_status and "error" in redis_status:
+        overall_status = "down"
+         
     return {
-        "status": "ok" if "error" not in db_status else "degraded", 
+        "status": overall_status, 
         "message": "Social Raven Cloud Backend is running",
         "database": db_status,
-        "initialized": db_initialized
+        "redis": redis_status,
+        "initialized": db_initialized,
+        "environment": ENVIRONMENT,
     }
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Social Raven Cloud API (Python/FastAPI)"}
+    return {
+        "message": "Welcome to Social Raven Cloud API (Python/FastAPI)",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 3000)), reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 3000)))

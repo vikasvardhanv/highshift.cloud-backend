@@ -1,0 +1,175 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: socialraven-backend
+    restart: always
+    environment:
+      # === Required Settings
+      ENVIRONMENT: "production"
+      BACKEND_URL: "https://api.socialraven.online"
+      FRONTEND_URL: "https://socialraven.online"
+      CORS_ORIGINS: "https://socialraven.online,https://www.socialraven.online,https://highshift.cloud,https://www.highshift.cloud"
+      JWT_SECRET: "${JWT_SECRET}"
+      DATABASE_URL: "${DATABASE_URL}"
+      REDIS_URL: "redis://redis:6379"
+      
+      # === Optional: Scheduler & Temporal
+      RUN_SCHEDULER: "true"
+      TEMPORAL_ENABLED: "true"
+      TEMPORAL_ADDRESS: "temporal:7233"
+      RUN_TEMPORAL_WORKER: "true"
+      
+      # === Social Media API Settings
+      TWITTER_CLIENT_ID: "${TWITTER_CLIENT_ID}"
+      TWITTER_CLIENT_SECRET: "${TWITTER_CLIENT_SECRET}"
+      TWITTER_REDIRECT_URI: "https://api.socialraven.online/auth/connect/twitter/callback"
+      FACEBOOK_APP_ID: "${FACEBOOK_APP_ID}"
+      FACEBOOK_APP_SECRET: "${FACEBOOK_APP_SECRET}"
+      FACEBOOK_REDIRECT_URI: "https://api.socialraven.online/auth/connect/facebook/callback"
+      INSTAGRAM_REDIRECT_URI: "https://api.socialraven.online/auth/connect/instagram/callback"
+      LINKEDIN_CLIENT_ID: "${LINKEDIN_CLIENT_ID}"
+      LINKEDIN_CLIENT_SECRET: "${LINKEDIN_CLIENT_SECRET}"
+      LINKEDIN_REDIRECT_URI: "https://api.socialraven.online/auth/connect/linkedin/callback"
+      YOUTUBE_GOOGLE_SCOPES: "https://www.googleapis.com/auth/youtube.upload,https://www.googleapis.com/auth/youtube.readonly,openid,profile,email"
+      TIKTOK_CLIENT_KEY: "${TIKTOK_CLIENT_KEY}"
+      TIKTOK_CLIENT_SECRET: "${TIKTOK_CLIENT_SECRET}"
+      TIKTOK_REDIRECT_URI: "https://api.socialraven.online/auth/connect/tiktok/callback"
+      PINTEREST_APP_ID: "${PINTEREST_APP_ID}"
+      PINTEREST_APP_SECRET: "${PINTEREST_APP_SECRET}"
+      PINTEREST_REDIRECT_URI: "https://api.socialraven.online/auth/connect/pinterest/callback"
+      THREADS_APP_ID: "${THREADS_APP_ID}"
+      THREADS_APP_SECRET: "${THREADS_APP_SECRET}"
+      THREADS_REDIRECT_URI: "https://api.socialraven.online/auth/connect/threads/callback"
+      BLUESKY_ENABLED: "true"
+      MASTODON_REDIRECT_URI: "https://api.socialraven.online/auth/connect/mastodon/callback"
+      
+      # === Sentry (Optional)
+      SENTRY_DSN: "${SENTRY_DSN}"
+      
+      # === Storage
+      STORAGE_PROVIDER: "cloudflare"
+      CLOUDFLARE_ACCOUNT_ID: "${CLOUDFLARE_ACCOUNT_ID}"
+      CLOUDFLARE_ACCESS_KEY: "${CLOUDFLARE_ACCESS_KEY}"
+      CLOUDFLARE_SECRET_ACCESS_KEY: "${CLOUDFLARE_SECRET_ACCESS_KEY}"
+      CLOUDFLARE_BUCKETNAME: "${CLOUDFLARE_BUCKETNAME}"
+      CLOUDFLARE_BUCKET_URL: "${CLOUDFLARE_BUCKET_URL}"
+      CLOUDFLARE_REGION: "auto"
+      
+      # === AI
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      
+      # === Payment / Stripe
+      STRIPE_PUBLISHABLE_KEY: "${STRIPE_PUBLISHABLE_KEY}"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY}"
+      STRIPE_SIGNING_KEY: "${STRIPE_SIGNING_KEY}"
+      
+    ports:
+      - "3000:3000"
+    networks:
+      - socialraven-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: socialraven-postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+    volumes:
+      - postgres-volume:/var/lib/postgresql/data
+    networks:
+      - socialraven-network
+    healthcheck:
+      test: pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  redis:
+    image: redis:7.2
+    container_name: socialraven-redis
+    restart: always
+    healthcheck:
+      test: redis-cli ping
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - redis-data:/data
+    networks:
+      - socialraven-network
+
+  temporal-postgresql:
+    container_name: temporal-postgresql
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_USER: temporal
+    networks:
+      - temporal-network
+    expose:
+      - 5432
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  temporal:
+    container_name: temporal
+    image: temporalio/auto-setup:1.28.1
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgresql
+      - BIND_ON_IP=0.0.0.0
+      - ENABLE_ES=false
+      - TEMPORAL_NAMESPACE=default
+    networks:
+      - temporal-network
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  temporal-ui:
+    container_name: temporal-ui
+    image: temporalio/ui:2.34.0
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    networks:
+      - temporal-network
+    ports:
+      - '8085:8080'
+
+networks:
+  socialraven-network:
+    driver: bridge
+  temporal-network:
+    driver: bridge
+    name: temporal-network
+
+volumes:
+  postgres-volume:
+  redis-data:
+  temporal-postgres-data:
