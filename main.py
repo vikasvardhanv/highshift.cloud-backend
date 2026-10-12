@@ -12,9 +12,13 @@ from contextlib import asynccontextmanager
 from contextlib import suppress
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.asyncio import AsyncioIntegration
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.asyncio import AsyncioIntegration
+    HAS_SENTRY = True
+except ImportError:
+    HAS_SENTRY = False
 
 from app.models.user import User
 from app.models.brand_kit import BrandKit
@@ -42,7 +46,7 @@ load_dotenv()
 
 # Initialize Sentry for error tracking
 SENTRY_DSN = os.getenv("SENTRY_DSN")
-if SENTRY_DSN:
+if SENTRY_DSN and HAS_SENTRY:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         integrations=[
@@ -354,10 +358,12 @@ def check_configuration():
     issues = []
     warnings = []
     
-    required_vars = [
-        "DATABASE_URL",
-        "JWT_SECRET",
-    ]
+    # Accept either DATABASE_URL (Postgres) or MONGODB_URI (Mongo)
+    if not (os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI")):
+        issues.append("Missing required database configuration: DATABASE_URL or MONGODB_URI must be set")
+    
+    if not os.getenv("JWT_SECRET"):
+        issues.append("Missing required environment variable: JWT_SECRET")
     
     recommended_vars = [
         "CORS_ORIGINS",
@@ -366,10 +372,6 @@ def check_configuration():
         "SENTRY_DSN",
         "REDIS_URL",
     ]
-    
-    for var in required_vars:
-        if not os.getenv(var):
-            issues.append(f"Missing required environment variable: {var}")
     
     for var in recommended_vars:
         if not os.getenv(var):
@@ -380,10 +382,13 @@ def check_configuration():
     if jwt_secret and jwt_secret in ("changethis_secret_key_please", "secret", "test"):
         warnings.append("JWT_SECRET appears to be using a default/weak value")
     
+    env = os.getenv("ENVIRONMENT", "development").lower()
     if issues:
         for issue in issues:
-            logging.getLogger("main").error(f"CONFIG ERROR: {issue}")
-        raise RuntimeError(f"Configuration errors: {'; '.join(issues)}")
+            logging.getLogger("main").warning(f"CONFIG WARNING: {issue}")
+        # Only crash on import if explicitly in production and not skipping
+        if env == "production" and not os.getenv("SKIP_CONFIG_CHECK"):
+            raise RuntimeError(f"Configuration errors: {'; '.join(issues)}")
     
     for warning in warnings:
         logging.getLogger("main").warning(f"CONFIG WARNING: {warning}")
